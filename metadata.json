@@ -1,0 +1,9 @@
+{
+  "name": "Sonora Studio",
+  "description": "Professional AI Dubbing and Sound Engineering Swarm",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}

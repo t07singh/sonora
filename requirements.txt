@@ -1,0 +1,54 @@
+# Core dependencies for Sonora/Auralis AI Dubbing System
+
+# ASR (Whisper)
+openai-whisper>=20231117
+
+# Translation (Local Offline)
+transformers==4.33.3
+torch>=2.0.0
+sentencepiece>=0.1.99
+
+# TTS Providers (Local Offline)
+TTS>=0.20.0
+
+# Gradio Client for Cloud GPU Separation
+gradio_client>=0.10.0
+
+# Audio processing
+librosa>=0.10.0
+soundfile>=0.12.0
+pydub>=0.25.0
+numpy>=1.24.0
+
+# Video processing
+opencv-python>=4.8.0
+moviepy>=1.0.3
+ffmpeg-python>=0.2.0
+
+# API Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# Web UI (optional)
+streamlit>=1.28.0
+
+# Configuration and utilities
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+
+# Development and testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+black>=23.0.0
+flake8>=6.0.0
+
+# Async support
+aiofiles>=23.0.0
+httpx>=0.25.0
+
+# AI Source Separation Models
+demucs>=4.0.0
+spleeter>=2.3.0
+openunmix>=1.0.0
+speechbrain>=0.5.0

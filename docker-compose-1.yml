@@ -1,0 +1,115 @@
+version: '3.8'
+
+services:
+  sonora-ui:
+    build:
+      context: .
+      dockerfile: src/cockpit/Dockerfile
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./shared_data:/tmp/sonora
+    environment:
+      - SEPARATOR_URL=http://sonora-separator:8000
+      - TRANSCRIBER_URL=http://sonora-transcriber:8001
+      - SYNTHESIZER_URL=http://sonora-synthesizer:8002
+      - LIPSYNC_URL=http://sonora-lipsync:8004
+      - REDIS_URL=redis://redis-cache:6379/0
+    depends_on:
+      - redis-cache
+    networks:
+      - sonora-network
+
+  sonora-transcriber:
+    build:
+      context: .
+      dockerfile: src/services/transcriber/Dockerfile
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./shared_data:/tmp/sonora
+    environment:
+      - WHISPER_MODEL=base
+      - REDIS_URL=redis://redis-cache:6379/0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    networks:
+      - sonora-network
+
+  sonora-separator:
+    build:
+      context: .
+      dockerfile: src/services/separator/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./shared_data:/tmp/sonora
+    environment:
+      - REDIS_URL=redis://redis-cache:6379/0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    networks:
+      - sonora-network
+
+  sonora-synthesizer:
+    build:
+      context: .
+      dockerfile: src/services/synthesizer/Dockerfile
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./shared_data:/tmp/sonora
+    environment:
+      - REDIS_URL=redis://redis-cache:6379/0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    networks:
+      - sonora-network
+
+  sonora-lipsync:
+    build:
+      context: .
+      dockerfile: src/services/lipsync_service/Dockerfile
+    ports:
+      - "8004:8004"
+    volumes:
+      - ./shared_data:/tmp/sonora
+    environment:
+      - REDIS_URL=redis://redis-cache:6379/0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    networks:
+      - sonora-network
+
+  redis-cache:
+    image: "redis:alpine"
+    ports:
+      - "6379:6379"
+    networks:
+      - sonora-network
+
+networks:
+  sonora-network:
+    driver: bridge
+
+# Local bind mount is used instead of named volumes for debugging visibility

@@ -1,0 +1,113 @@
+# SONORA MASTER SPEC
+## The "God File" for Sonora Swarm Intelligence
+
+### System Identity
+Sonora is a **Multi-Agent, CPU-Hardened AI Voice Studio** designed for local-first, low-latency dubbing and voice cloning. It creates a "Swarm" of microservices (Transcriber, Separator, Synthesizer) that communicate via a shared filesystem volume. Unlike cloud-dependent architectures, Sonora prioritizes **Availability over Speed**, utilizing aggressive CPU-offloading and fallback strategies (e.g., Qwen3-TTS) to run effectively on standard consumer hardware (WSL2/Windows) without requiring high-end GPUs.
+
+---
+
+### Service Topology
+
+```mermaid
+graph TD
+    user(User / UI Port 8501) -->|Requests| orch[Orchestrator]
+    
+    subgraph "Docker Swarm (Shared Volume: /tmp/sonora)"
+        orch -->|1. Transcribe| transcriber[Transcriber :8001]
+        orch -->|2. Separate| separator[Separator :8000]
+        orch -->|3. Synthesize| synth[Sonora Synthesizer :8002]
+        
+        synth -->|Internal Routing| qwen[Qwen3-TTS Provider]
+        synth -->|Internal Routing| vibe[VibeVoice Provider]
+        
+        orch -.->|Writes JSON Tasks| task_vol[ /tmp/sonora/tasks ]
+        qwen -.->|Polls JSON| task_vol
+        qwen -.->|Writes WAV| out_vol[ /tmp/sonora / outputs ]
+        orch -.->|Reads WAV| out_vol
+    end
+
+    redis[Redis Cache :6379] --- orch
+```
+
+**Key Interfaces:**
+- **Orchestrator**: The brain. orchestrates the linear pipeline.
+- **Port 8002 (Synthesizer)**: The primary synthesis endpoint. Hosts Qwen3 and VibeVoice.
+- **Shared Volume**: `/tmp/sonora` (mapped to `./shared_data` on host) is the physical transport layer for heavy audio assets, bypassing HTTP overhead for large files.
+
+---
+
+### The Handshake Protocol
+Sonora uses an **Atomic 'Write-Then-Rename' JSON Protocol** to manage asynchronous tasks between the Orchestrator and the Qwen3/Vibe provider.
+
+1.  **Dispatch**: The Orchestrator writes a task definition (JSON) to `/tmp/sonora/tasks/{uuid}.json`.
+2.  **Poll**: The Provider (Qwen3 Service) runs a 12Hz hard-loop scanning for `*.json` files.
+3.  **Lock & Process**:
+    *   The Provider opens the file, reads the task, and *immediately* caches the instruction.
+    *   It generates the audio to `/tmp/sonora/outputs/{uuid}.wav`.
+4.  **Completion**:
+    *   The task JSON is **deleted** only after the WAV file is fully flushed to disk.
+    *   The Orchestrator waits (polls) for the existence of `{uuid}.wav`.
+    *   **Timeout**: If no WAV appears within 10s, the Orchestrator triggers a fallback (e.g., to VibeVoice).
+
+---
+
+### Provider Matrix
+
+| Scenario | Provider | Reason |
+| :--- | :--- | :--- |
+| **Short Clones (< 5s)** | **Qwen3 (Local)** | Extremely fast inference for short bursts; low overhead. |
+| **Multilingual (Local)** | **Qwen3 (Local)** | Supports 10+ languages without cloud dependency. |
+| **Long Form / High Quality** | **VibeVoice** | Better prosody and stability for long narrations; slower generation. |
+| **High Fidelity / Cloud** | **ElevenLabs** | Only when `is_cloud_allowed=True`. Production-grade quality. |
+
+**Route Logic:** `Orchestrator.route_voice_task()` automatically determines the provider based on `reference_audio_duration` and `text_length`.
+
+---
+
+### Code Logic Map
+
+#### `sonora/core/orchestrator.py`
+**Core Intent:** The central pipeline manager. It chains transcription, translation (surgical), and synthesis. It handles the "Swarm Routing" logic and fallback mechanisms.
+-   `process_studio_pipeline`: The main function that links all agents (Transcriber -> Translator -> Synthesizer -> Mixer).
+-   `route_voice_task`: strict logic tree for choosing Qwen3 vs VibeVoice vs ElevenLabs.
+-   `dispatch_to_qwen`: Implements the JSON-based atomic handshake for the Qwen3 service.
+
+#### `src/providers/qwen3/qwen3_service.py`
+**Core Intent:** A dedicated FastAPI wrapper for the Qwen3 text-to-speech model. It implements a file-watcher loop to process async tasks from the shared volume.
+-   `task_watcher_loop`: The background thread that continuously polls `/tmp/sonora/tasks` for new JSON jobs.
+-   `process_task_file`: Reads the JSON, executes inference (or mock), writes the WAV, and cleans up the JSON.
+-   `startup_event`: Initializes the model and optionally Flash Attention (if GPU available).
+
+#### `src/services/synthesizer/main.py`
+**Core Intent:** The entry point for the Synthesis microservice container. It acts as the host for the VibeVoice and Qwen3 logic within the Docker environment.
+-   `health`: Simple endpoint returning "healthy" and the current device (CPU/CUDA).
+-   *(Entry Point)*: Launches code that likely imports functionality from `qwen3_service` or `vibevoice`.
+
+#### `src/core/bus_system.py`
+**Core Intent:** A professional-grade audio mixer. It manages multiple audio "buses" (Voice, Music, SFX) with effects like EQ, compression, and reverb.
+-   `load_audio_to_bus`: Loads raw audio data (numpy arrays) onto a specific bus channel.
+-   `process_audio`: The main render loop that applies effects and sums all buses into a final mix.
+-   `_apply_effect`: Applies DSP (Digital Signal Processing) chains (Equalizer, Compressor, Reverb) to the audio stream.
+
+#### `src/core/reliability.py`
+**Core Intent:** Provides resilience utilities for the swarm. Defines retry logic and hardware capabilities.
+-   `get_device`: **Critical**. Detects if CUDA is available; if not, logs "CPU-Hardened Mode" and forces CPU execution.
+-   `retry_api_call`: A decorator implementing exponential backoff with jitter for brittle API calls.
+
+---
+
+### Active Constraints
+
+1.  **CPU-Hardened**: All services MUST verify `get_device()` on startup. If "cpu" is returned, heavier models (like large VibeVoice variants) must downgrade or switch to quantized versions. No code should assume CUDA exists.
+2.  **WSL2 / Windows Pathing**:
+    *   **Internal**: Services see `/tmp/sonora`.
+    *   **External**: Host sees `.\shared_data`.
+    *   **Rule**: Code *inside* Docker MUST strictly use `/tmp/sonora` or relative paths. Never use absolute Windows paths (e.g., `C:\...`) inside containers.
+3.  **12Hz Tokenizer Requirements**: The Qwen3 service requires a precise polling or tokenization frequency (approx. 12Hz or 80ms) to maintain stability in stream processing and avoid buffer underruns during playback.
+
+---
+
+### Validation
+-   **No "Happy Path" Assumptions**: Code assumes API calls *will* fail and files *will* be locked.
+-   **Strict Typing**: All critical data exchange (tasks) uses validated JSON schemas.
+-   **Volume Persistence**: Data written to `/tmp/sonora` persists across container restarts; ephemeral RAM (`/dev/shm`) is NOT used for task handshakes to ensure debuggability.

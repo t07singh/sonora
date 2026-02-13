@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  sonora-ui:
+    image: sonora-studio/ui:prod
+    build:
+      context: .
+      dockerfile: src/cockpit/Dockerfile
+    restart: always
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8501/_stcore/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    ports:
+      - "8501:8501"
+    volumes:
+      - sonora_data:/app/sonora/data
+    env_file: .env
+    depends_on:
+      redis-cache:
+        condition: service_started
+      sonora-api:
+        condition: service_started
+    networks:
+      - sonora-network
+
+  sonora-api:
+    image: sonora-studio/api:prod
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: always
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    ports:
+      - "8000:8000"
+    volumes:
+      - sonora_data:/app/sonora/data
+    env_file: .env
+    depends_on:
+      redis-cache:
+        condition: service_started
+    networks:
+      - sonora-network
+
+  # --- Microservices (GPU Optimized) ---
+
+  sonora-transcriber:
+    image: sonora-studio/transcriber:prod
+    build:
+      context: .
+      dockerfile: src/services/transcriber/Dockerfile
+    restart: on-failure
+    volumes:
+      - sonora_data:/app/sonora/data
+    env_file: .env
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    networks:
+      - sonora-network
+
+  sonora-synthesizer:
+    image: sonora-studio/synthesizer:prod
+    build:
+      context: .
+      dockerfile: src/services/synthesizer/Dockerfile
+    restart: on-failure
+    volumes:
+      - sonora_data:/app/sonora/data
+    env_file: .env
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    networks:
+      - sonora-network
+
+  # --- Infrastructure ---
+
+  redis-cache:
+    image: "redis:alpine"
+    command: redis-server --appendonly yes
+    restart: always
+    volumes:
+      - redis_data:/data
+    networks:
+      - sonora-network
+
+volumes:
+  sonora_data:
+  redis_data:
+
+
+networks:
+  sonora-network:
+    driver: bridge
