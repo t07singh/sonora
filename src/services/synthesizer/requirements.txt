@@ -1,0 +1,14 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+fastapi
+uvicorn
+torch==2.2.2+cpu
+torchaudio==2.2.2+cpu
+soundfile
+numpy<2.0.0
+librosa
+opencv-python
+pydantic
+python-multipart
+# Add VibeVoice/Lip-sync specific dependencies if needed
+# vibevoice-tts  # (if package exists)
+# moviepy # (for video processing if used)

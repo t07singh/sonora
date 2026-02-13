@@ -1,0 +1,5 @@
+{
+  "artifactType": "ARTIFACT_TYPE_IMPLEMENTATION_PLAN",
+  "summary": "A detailed \"One-Shot Context File\" for the Sonora Swarm project, serving as the Source of Truth for future AI sessions. It includes system identity, service topology, handshake protocols, provider matrix, and code logic maps, strictly adhering to the user's constraints.",
+  "updatedAt": "2026-01-27T15:27:27.975905300Z"
+}

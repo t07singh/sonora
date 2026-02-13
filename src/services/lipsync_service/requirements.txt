@@ -1,0 +1,9 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+fastapi
+pydantic
+uvicorn
+numpy<2.0.0
+opencv-python
+onnxruntime
+torch==2.2.2+cpu
+python-multipart

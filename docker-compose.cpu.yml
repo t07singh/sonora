@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  sonora-ui:
+    image: sonora-studio/ui:prod
+    build:
+      context: .
+      dockerfile: src/cockpit/Dockerfile
+    restart: always
+    ports:
+      - "8501:8501"
+    volumes:
+      - sonora_data:/app/sonora/data
+    env_file: .env
+    depends_on:
+      - redis-cache
+      - sonora-api
+    networks:
+      - sonora-network
+
+  sonora-api:
+    image: sonora-studio/api:prod
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - sonora_data:/app/sonora/data
+    env_file: .env
+    depends_on:
+      - redis-cache
+    networks:
+      - sonora-network
+
+  # --- Microservices (CPU Fallback) ---
+
+  sonora-transcriber:
+    image: sonora-studio/transcriber:prod
+    build:
+      context: .
+      dockerfile: src/services/transcriber/Dockerfile
+    restart: on-failure
+    volumes:
+      - sonora_data:/app/sonora/data
+    env_file: .env
+    # GPU Reservation Removed for CPU Mode
+    networks:
+      - sonora-network
+
+  sonora-synthesizer:
+    image: sonora-studio/synthesizer:prod
+    build:
+      context: .
+      dockerfile: src/services/synthesizer/Dockerfile
+    restart: on-failure
+    volumes:
+      - sonora_data:/app/sonora/data
+    env_file: .env
+    # GPU Reservation Removed for CPU Mode
+    networks:
+      - sonora-network
+
+  # --- Infrastructure ---
+
+  redis-cache:
+    image: "redis:alpine"
+    command: redis-server --appendonly yes
+    restart: always
+    volumes:
+      - redis_data:/data
+    networks:
+      - sonora-network
+
+volumes:
+  sonora_data:
+  redis_data:
+
+
+networks:
+  sonora-network:
+    driver: bridge

@@ -1,0 +1,8 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+fastapi
+uvicorn
+openai-whisper
+torch==2.2.2+cpu
+numpy<2.0.0
+pydantic
+python-multipart

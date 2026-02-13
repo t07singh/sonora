@@ -1,0 +1,34 @@
+============================================================
+  QUICK START - COPY AND PASTE THESE COMMANDS
+============================================================
+
+1. Open Command Prompt (Win+R, type "cmd")
+
+2. Copy and paste this:
+   cd C:\Users\HP\.cursor\sonora
+
+3. Copy and paste this:
+   py -m uvicorn api.server:app --host 127.0.0.1 --port 8000 --reload
+
+4. Wait for this message:
+   INFO:     Uvicorn running on http://127.0.0.1:8000
+
+5. Test in browser:
+   http://127.0.0.1:8000/health
+
+============================================================
+  IF YOU SEE ERRORS
+============================================================
+
+Copy the ENTIRE error message and share it.
+
+============================================================
+
+
+
+
+
+
+
+
+

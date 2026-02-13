@@ -1,0 +1,44 @@
+# Sonora/Auralis Configuration File
+
+# ASR Configuration
+asr:
+  model: "base"  # whisper model: tiny, base, small, medium, large
+  language: null  # auto-detect if null
+  word_timestamps: true
+
+# Translation Configuration
+translation:
+  provider: "openai"  # openai or anthropic
+  model: "gpt-4"
+  temperature: 0.3
+
+# TTS Configuration
+tts:
+  provider: "elevenlabs"  # elevenlabs or vibevoice
+  voice_id: "21m00Tcm4TlvDq8ikWAM"
+  model: "eleven_multilingual_v2"
+  stability: 0.75
+  similarity_boost: 0.8
+  style: 0.2
+
+# Audio Configuration
+audio:
+  sample_rate: 44100
+  channels: 2
+  bit_depth: 16
+  preserve_sfx: true
+  preserve_laughs: true
+  preserve_bgm: true
+
+# API Configuration
+api:
+  host: "0.0.0.0"
+  port: 8000
+  debug: false
+
+# General Settings
+general:
+  log_level: "INFO"
+  temp_dir: "./temp"
+  output_dir: "./output"
+

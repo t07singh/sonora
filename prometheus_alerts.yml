@@ -1,0 +1,98 @@
+groups:
+- name: sonora-alerts
+  rules:
+  - alert: SonoraDown
+    expr: absent(sonora_live_status == 1)
+    for: 30s
+    labels:
+      severity: critical
+      service: sonora
+    annotations:
+      summary: "Sonora service is not live"
+      description: "sonora_live_status missing or zero for >30s. Service may be down or unhealthy."
+      runbook_url: "https://github.com/your-org/sonora/blob/main/docs/runbooks/service-down.md"
+
+  - alert: SonoraHighLatency
+    expr: histogram_quantile(0.95, sum(rate(sonora_processing_seconds_bucket[5m])) by (le)) > 2
+    for: 2m
+    labels:
+      severity: warning
+      service: sonora
+    annotations:
+      summary: "High 95th percentile processing latency"
+      description: "95th percentile processing latency is {{ $value }}s, above threshold of 2s"
+      runbook_url: "https://github.com/your-org/sonora/blob/main/docs/runbooks/high-latency.md"
+
+  - alert: SonoraHighErrorRate
+    expr: rate(sonora_dub_requests_total{status="error"}[5m]) / rate(sonora_dub_requests_total[5m]) > 0.1
+    for: 1m
+    labels:
+      severity: warning
+      service: sonora
+    annotations:
+      summary: "High error rate detected"
+      description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes"
+      runbook_url: "https://github.com/your-org/sonora/blob/main/docs/runbooks/high-error-rate.md"
+
+  - alert: SonoraNoRequests
+    expr: rate(sonora_dub_requests_total[10m]) == 0
+    for: 5m
+    labels:
+      severity: info
+      service: sonora
+    annotations:
+      summary: "No requests received in the last 10 minutes"
+      description: "No dubbing requests have been processed in the last 10 minutes"
+
+  - alert: SonoraUptimeLow
+    expr: sonora_up_seconds < 300
+    for: 0s
+    labels:
+      severity: info
+      service: sonora
+    annotations:
+      summary: "Service recently restarted"
+      description: "Sonora has been running for only {{ $value }}s, indicating a recent restart"
+
+  - alert: SonoraHealthCheckFailing
+    expr: up{job="sonora"} == 0
+    for: 1m
+    labels:
+      severity: critical
+      service: sonora
+    annotations:
+      summary: "Sonora health check failing"
+      description: "Prometheus cannot scrape metrics from Sonora service"
+      runbook_url: "https://github.com/your-org/sonora/blob/main/docs/runbooks/health-check-failing.md"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

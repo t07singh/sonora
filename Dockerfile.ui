@@ -1,0 +1,21 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements_ui.txt .
+RUN pip install --no-cache-dir -r requirements_ui.txt
+
+COPY src/core /app/src/core
+COPY src/cockpit /app/src/cockpit
+
+ENV PYTHONPATH=/app
+ENV PROJECTS_BASE=/app/projects
+
+EXPOSE 8501
+
+CMD ["streamlit", "run", "src/cockpit/app.py", "--server.port=8501", "--server.address=0.0.0.0"]
