@@ -15,10 +15,14 @@ services:
       - SYNTHESIZER_URL=http://sonora-synthesizer:8002
       - LIPSYNC_URL=http://sonora-lipsync:8004
       - REDIS_URL=redis://redis-cache:6379/0
+      - SONORA_MODE=production
     depends_on:
       - redis-cache
+      - sonora-transcriber
+      - sonora-synthesizer
     networks:
       - sonora-network
+    restart: on-failure
 
   sonora-transcriber:
     build:
@@ -40,6 +44,12 @@ services:
               capabilities: [ gpu ]
     networks:
       - sonora-network
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8001/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: on-failure
 
   sonora-separator:
     build:
@@ -60,6 +70,12 @@ services:
               capabilities: [ gpu ]
     networks:
       - sonora-network
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: on-failure
 
   sonora-synthesizer:
     build:
@@ -80,6 +96,12 @@ services:
               capabilities: [ gpu ]
     networks:
       - sonora-network
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8002/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: on-failure
 
   sonora-lipsync:
     build:
@@ -100,6 +122,12 @@ services:
               capabilities: [ gpu ]
     networks:
       - sonora-network
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8004/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: on-failure
 
   redis-cache:
     image: "redis:alpine"
@@ -107,9 +135,8 @@ services:
       - "6379:6379"
     networks:
       - sonora-network
+    restart: always
 
 networks:
   sonora-network:
     driver: bridge
-
-# Local bind mount is used instead of named volumes for debugging visibility
