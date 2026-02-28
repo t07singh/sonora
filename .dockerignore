@@ -23,21 +23,10 @@ stems/
 takes/
 anchors/
 models/
-!models/placeholder.txt
 *.mp4
 *.wav
 *.mp3
 *.zip
 *.tar.gz
-C:\Users\HP\.gemini\antigravity\brain\
-C:\Users\HP\.gemini\antigravity\workflow_logs\
-C:\Users\HP\.gemini\antigravity\backlogs\
-C:\Users\HP\.gemini\antigravity\summaries\
-C:\Users\HP\.gemini\antigravity\tmp\
-C:\Users\HP\.gemini\antigravity\artifacts\
-C:\Users\HP\.gemini\antigravity\knowledge\
-C:\Users\HP\.gemini\antigravity\persistent_context\
-C:\Users\HP\.gemini\antigravity\logs\
-C:\Users\HP\.gemini\antigravity\tasks\
-C:\Users\HP\.gemini\antigravity\walkthroughs\
-C:\Users\HP\.gemini\antigravity\implementation_plans\
+# Removed invalid absolute paths causing build syntax errors
+

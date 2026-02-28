@@ -5,6 +5,15 @@ REM ============================================================
 
 cd /d "%~dp0sonora"
 
+REM Ensure HOME environment variable is set (required for some components like browser/Playwright)
+if "%HOME%"=="" (
+    if not "%USERPROFILE%"=="" (
+        set "HOME=%USERPROFILE%"
+    ) else (
+        set "HOME=%CD%"
+    )
+)
+
 echo.
 echo ============================================================
 echo   🎨 STARTING SONORA UI

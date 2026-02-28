@@ -7,8 +7,8 @@ import soundfile as sf
 
 logger = logging.getLogger("sonora.voice_registry")
 
-# Root directory for production assets
-VOICE_DIR = Path("sonora/data/voices")
+# Root directory for production assets. Configurable via environment variable for persistent storage.
+VOICE_DIR = Path(os.getenv("REGISTRY_PATH", "sonora/data/voices"))
 
 def extract_embedding_from_audio(audio_path: str):
     """

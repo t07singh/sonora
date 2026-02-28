@@ -17,10 +17,26 @@ except ImportError as e:
     # Basic mocks to prevent immediate crash if imports fail during dev
     class SeparationModel:
         DEMUCS = "demucs"
+        DEMUCS_V4 = "htdemucs"
         SPLEETER = "spleeter"
     class AudioSeparator: 
-        def __init__(self, **kwargs): pass
-        model = "mock"
+        def __init__(self, **kwargs):
+            self.model = "mock"
+            logger.warning("⚠️ AudioSeparator running in MOCK mode due to import failure.")
+        
+        def separate_audio(self, audio_path, **kwargs):
+            logger.info(f"🧪 Mock separation triggered for {audio_path}")
+            # Return a mock result to match SeparationResult structure
+            from dataclasses import dataclass
+            @dataclass
+            class MockResult:
+                voice: np.ndarray
+                music: np.ndarray
+                sample_rate: int = 44100
+            
+            # Create small mock audio arrays
+            return MockResult(voice=np.zeros(100), music=np.zeros(100))
+
     class BusMixer: 
         def __init__(self, *args, **kwargs): pass
         def perform_surgery(self, **kwargs): return "mock_fixed.wav"
@@ -46,7 +62,7 @@ class AudioEditorUI:
     """
     def __init__(self, audio_path: Optional[str] = None):
         self.audio_path = audio_path
-        self.audio_separator = AudioSeparator(model=SeparationModel.DEMUCS) # Use powerful model
+        self.audio_separator = AudioSeparator(model=SeparationModel.SWARM_DEMUCS) # Offload to GPU Swarm
         
         # UI State
         self.separation_result = None
@@ -142,7 +158,7 @@ class AudioEditorUI:
                 if "Spleeter" in model_name:
                     self.audio_separator.model = SeparationModel.SPLEETER
                 else: 
-                    self.audio_separator.model = SeparationModel.DEMUCS
+                    self.audio_separator.model = SeparationModel.SWARM_DEMUCS
                 
                 # Perform separation on the file path
                 self.separation_result = self.audio_separator.separate_audio(self.audio_path)
