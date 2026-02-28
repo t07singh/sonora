@@ -5,6 +5,17 @@ REM ============================================================
 
 cd /d "%~dp0sonora"
 
+REM Ensure HOME environment variable is set (required for some components like browser/Playwright)
+if "%HOME%"=="" (
+    if not "%USERPROFILE%"=="" (
+        set "HOME=%USERPROFILE%"
+        echo [INFO] Setting HOME to %USERPROFILE%
+    ) else (
+        set "HOME=%CD%"
+        echo [WARNING] HOME and USERPROFILE not found. Setting HOME to current directory.
+    )
+)
+
 echo.
 echo ============================================================
 echo   🎬 SONORA AI DUBBING INTERFACE

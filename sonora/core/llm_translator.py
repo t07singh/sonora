@@ -71,33 +71,42 @@ class GeminiTranslator:
         response = self.client.generate_content(prompt)
         return response.text.strip()
 
+class LocalQwenProvider:
+    def __init__(self, model_path: str = "models/qwen7b"):
+        self.model_path = model_path
+        self.translator = None
+        try:
+            from src.services.translator.qwen_local import LocalQwenTranslator
+            self.translator = LocalQwenTranslator(model_path=model_path)
+        except Exception as e:
+            logger.warning(f"Failed to load LocalQwenTranslator: {e}")
+
+    @retry_api_call(max_retries=3, base_delay=1)
+    def translate(self, prompt: str) -> str:
+        if not self.translator or not self.translator.is_ready:
+            raise RuntimeError("Local Qwen Translator not ready.")
+        return self.translator.translate(prompt)
+
 class HardenedTranslator:
     """
     Consolidated Translator that delegates to cloud providers.
     Supports: OpenAI (GPT-4o), Anthropic (Claude), Gemini (Free tier)
     Fallback to mock mode if no API keys are available.
     """
-    def __init__(self, provider: Literal["openai", "anthropic", "gemini"] = "gemini"):
+    def __init__(self, provider: Literal["openai", "anthropic", "gemini", "local_qwen"] = "gemini"):
         self.provider = provider
         self.mock_mode = False
-        
-        # Check if API keys are available
-        if provider == "openai" and not os.getenv("OPENAI_API_KEY"):
-            logger.warning("No OPENAI_API_KEY found. Falling back to MOCK mode.")
-            self.mock_mode = True
-        elif provider == "anthropic" and not os.getenv("ANTHROPIC_API_KEY"):
-            logger.warning("No ANTHROPIC_API_KEY found. Falling back to MOCK mode.")
-            self.mock_mode = True
-        elif provider == "gemini" and not os.getenv("GEMINI_API_KEY"):
+
+        if self.provider == "gemini" and not os.getenv("GEMINI_API_KEY"):
             logger.warning("No GEMINI_API_KEY found. Falling back to MOCK mode.")
             self.mock_mode = True
         
-        if not self.mock_mode:
-            if provider == "openai":
+        if not self.mock_mode and not hasattr(self, 'translator'):
+            if self.provider == "openai":
                 self.translator = OpenAITranslator()
-            elif provider == "anthropic":
+            elif self.provider == "anthropic":
                 self.translator = AnthropicTranslator()
-            elif provider == "gemini":
+            elif self.provider == "gemini":
                 self.translator = GeminiTranslator()
 
     def translate(self, prompt: str) -> str:
@@ -118,4 +127,4 @@ class HardenedTranslator:
             logger.error(f"Cloud translation completely failed after 3 attempts: {e}")
             # Final fallback to mock
             logger.warning("Falling back to MOCK mode due to API failure")
-            return f"[FALLBACK MOCK] Translation unavailable")
+            return f"[FALLBACK MOCK] Translation unavailable"

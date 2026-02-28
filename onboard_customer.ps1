@@ -80,20 +80,32 @@ Write-Host "🚀 Launching instance for $CustomerName..." -ForegroundColor Magen
 Set-Location $InstanceDir
 docker-compose -p "sonora-$CustomerId" up -d
 
-# 6. Verify Service Health
-Write-Host "📡 Verifying API connectivity (waiting 10s)..." -ForegroundColor Cyan
-Start-Sleep -Seconds 10
-try {
-    $Health = Invoke-RestMethod -Uri "http://localhost:8000/health" -Headers @{"X-Sonora-Key" = $SonoraKey } -Method Get
-    if ($Health.status -eq "ok") {
-        Write-Host "✅ System Healthy: Orchestrator is online." -ForegroundColor Green
+# 6. Verify Service Health (Retry loop for cloud-side weight download)
+$MaxRetries = 30 # 30 retries * 10s = 300s (5 minutes)
+$RetryCount = 0
+$Healthy = $false
+
+Write-Host "📡 Verifying API connectivity (Waiting for neural handshake / model download)..." -ForegroundColor Cyan
+
+while (-not $Healthy -and $RetryCount -lt $MaxRetries) {
+    try {
+        $Health = Invoke-RestMethod -Uri "http://localhost:8000/health" -Headers @{"X-Sonora-Key" = $SonoraKey } -Method Get
+        if ($Health.status -eq "ok") {
+            $Healthy = $true
+            Write-Host "✅ System Healthy: Orchestrator is online." -ForegroundColor Green
+        }
     }
-    else {
-        Write-Host "⚠️  System reported status: $($Health.status)" -ForegroundColor Yellow
+    catch {
+        $RetryCount++
+        if ($RetryCount % 6 -eq 0) { # Every minute
+            Write-Host "⏳ Still waiting for system to warm up (Minute $($RetryCount / 6))..." -ForegroundColor Gray
+        }
+        Start-Sleep -Seconds 10
     }
 }
-catch {
-    Write-Host "❌ Health check failed. API may still be warming up or failed to start." -ForegroundColor Red
+
+if (-not $Healthy) {
+    Write-Host "❌ Health check failed after 5 minutes. API may have failed to start or download is taking too long." -ForegroundColor Red
     Write-Host "   Check logs with: docker-compose -p sonora-$CustomerId logs sonora-api" -ForegroundColor Gray
 }
 

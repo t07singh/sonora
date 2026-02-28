@@ -2,53 +2,77 @@ version: '3.8'
 
 services:
   sonora-ui:
-    build:
-      context: .
-      dockerfile: src/cockpit/Dockerfile
+    container_name: sonora-ui
+    image: litcr.io/lit-container/roshnis0238/sonora-external-testing-project/sonora:latest
+    command: [ "streamlit", "run", "unified_demo.py", "--server.port=8501", "--server.address=0.0.0.0" ]
     ports:
       - "8501:8501"
     volumes:
+      - ./src:/app/src
+      - ./sonora:/app/sonora
       - ./shared_data:/tmp/sonora
+      - /teamspace/studios/this_studio/sonora_weights/models:/app/models
+      - /teamspace/studios/this_studio/sonora_weights:/root/.cache
     environment:
-      - SEPARATOR_URL=http://sonora-separator:8000
-      - TRANSCRIBER_URL=http://sonora-transcriber:8001
-      - SYNTHESIZER_URL=http://sonora-synthesizer:8002
-      - LIPSYNC_URL=http://sonora-lipsync:8004
+      - SEPARATOR_URL=http://sonora-separator:8000/process
+      - TRANSCRIBER_URL=http://sonora-transcriber:8001/transcribe
+      - SYNTHESIZER_URL=http://sonora-synthesizer:8002/synthesize
       - REDIS_URL=redis://redis-cache:6379/0
+      - BACKEND_URL=http://sonora-api:8000
+      - SHARED_PATH=/tmp/sonora
+      - SONORA_MODE=production
     depends_on:
       - redis-cache
+      - sonora-model-downloader
     networks:
       - sonora-network
 
-  # Imported from sonora-studio (1)
   sonora-api:
-    build:
-      context: .
-      dockerfile: Dockerfile.api
+    container_name: sonora-api
+    image: litcr.io/lit-container/roshnis0238/sonora-external-testing-project/sonora:latest
+    command: [ "python", "run_server.py" ]
     ports:
       - "8000:8000"
     volumes:
+      - ./src:/app/src
+      - ./sonora:/app/sonora
       - ./shared_data:/tmp/sonora
+      - /teamspace/studios/this_studio/sonora_weights/models:/app/models
+      - /teamspace/studios/this_studio/sonora_weights:/root/.cache
     environment:
-      - SEPARATOR_URL=http://sonora-separator:8000
-      - ASR_SERVICE_URL=http://sonora-transcriber:8001
-      - SYNTHESIZER_URL=http://sonora-synthesizer:8002
-      - LIPSYNC_URL=http://sonora-lipsync:8004
+      - SEPARATOR_URL=http://sonora-separator:8000/process
+      - TRANSCRIBER_URL=http://sonora-transcriber:8001/transcribe
+      - SYNTHESIZER_URL=http://sonora-synthesizer:8002/synthesize
       - REDIS_URL=redis://redis-cache:6379/0
+      - BACKEND_URL=http://sonora-api:8000
+      - SHARED_PATH=/tmp/sonora
+      - SONORA_MODE=production
+      - REGISTRY_PATH=/teamspace/studios/this_studio/sonora_weights/registry
+    depends_on:
+      - sonora-model-downloader
     networks:
       - sonora-network
 
   sonora-transcriber:
-    build:
-      context: .
-      dockerfile: src/services/transcriber/Dockerfile
+    container_name: sonora-transcriber
+    image: litcr.io/lit-container/roshnis0238/sonora-external-testing-project/sonora:latest
+    command: [ "python", "src/services/transcriber/main.py" ]
     ports:
       - "8001:8001"
     volumes:
+      - ./src:/app/src
+      - ./sonora:/app/sonora
       - ./shared_data:/tmp/sonora
+      - /teamspace/studios/this_studio/sonora_weights/models:/app/models
+      - /teamspace/studios/this_studio/sonora_weights:/root/.cache
     environment:
-      - WHISPER_MODEL=base
+      - WHISPER_MODEL=large-v3
       - REDIS_URL=redis://redis-cache:6379/0
+      - BACKEND_URL=http://sonora-api:8000
+      - SHARED_PATH=/tmp/sonora
+      - SONORA_MODE=production
+    depends_on:
+      - sonora-model-downloader
     deploy:
       resources:
         reservations:
@@ -60,15 +84,24 @@ services:
       - sonora-network
 
   sonora-separator:
-    build:
-      context: .
-      dockerfile: src/services/separator/Dockerfile
+    container_name: sonora-separator
+    image: litcr.io/lit-container/roshnis0238/sonora-external-testing-project/sonora:latest
+    command: [ "python", "src/services/separator/main.py" ]
     ports:
-      - "8000:8000"
+      - "8003:8000"
     volumes:
+      - ./src:/app/src
+      - ./sonora:/app/sonora
       - ./shared_data:/tmp/sonora
+      - /teamspace/studios/this_studio/sonora_weights/models:/app/models
+      - /teamspace/studios/this_studio/sonora_weights:/root/.cache
     environment:
       - REDIS_URL=redis://redis-cache:6379/0
+      - BACKEND_URL=http://sonora-api:8000
+      - SHARED_PATH=/tmp/sonora
+      - SONORA_MODE=production
+    depends_on:
+      - sonora-model-downloader
     deploy:
       resources:
         reservations:
@@ -80,35 +113,23 @@ services:
       - sonora-network
 
   sonora-synthesizer:
-    build:
-      context: .
-      dockerfile: src/services/synthesizer/Dockerfile
+    container_name: sonora-synthesizer
+    image: litcr.io/lit-container/roshnis0238/sonora-external-testing-project/sonora:latest
+    command: [ "python", "src/services/synthesizer/main.py" ]
     ports:
       - "8002:8002"
     volumes:
+      - ./src:/app/src
+      - ./sonora:/app/sonora
       - ./shared_data:/tmp/sonora
+      - /teamspace/studios/this_studio/sonora_weights/models:/app/models
+      - /teamspace/studios/this_studio/sonora_weights:/root/.cache
     environment:
       - REDIS_URL=redis://redis-cache:6379/0
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-    networks:
-      - sonora-network
-
-  sonora-lipsync:
-    build:
-      context: .
-      dockerfile: src/services/lipsync_service/Dockerfile
-    ports:
-      - "8004:8004"
-    volumes:
-      - ./shared_data:/tmp/sonora
-    environment:
-      - REDIS_URL=redis://redis-cache:6379/0
+      - BACKEND_URL=http://sonora-api:8000
+      - SHARED_PATH=/tmp/sonora
+      - SONORA_MODE=production
+      - REGISTRY_PATH=/teamspace/studios/this_studio/sonora_weights/registry
     deploy:
       resources:
         reservations:
@@ -121,8 +142,21 @@ services:
 
   redis-cache:
     image: "redis:alpine"
-    ports:
-      - "6379:6379"
+    networks:
+      - sonora-network
+
+  sonora-model-downloader:
+    container_name: sonora-model-downloader
+    image: python:3.10-slim
+    volumes:
+      - /teamspace/studios/this_studio/sonora_weights/models:/app/models
+      - ./scripts:/app/scripts
+      - ./sonora:/app/sonora
+      - /teamspace/studios/this_studio/sonora_weights:/root/.cache
+    working_dir: /app
+    command: >
+      sh -c "pip install huggingface_hub torch faster-whisper demucs requests soundfile && 
+             python scripts/bundle_weights.py"
     networks:
       - sonora-network
 

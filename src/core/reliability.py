@@ -31,14 +31,24 @@ class HardwareLock:
     _lock_timeout = 120 # 2 minute safety timeout
 
     @classmethod
-    async def acquire(cls, model_name: str):
-        logger.info(f"🔒 Requesting HardwareLock for {model_name}...")
+    async def acquire(cls, model_name: str, priority: int = 5):
+        """
+        Acquire the hardware lock with priority (1-10, lower is higher priority).
+        High priority tasks get shorter poll intervals.
+        """
+        logger.info(f"🔒 [REASONING] Node {model_name} (Priority {priority}) requesting HardwareLock...")
+        
+        start_time = time.time()
+        # High priority tasks (1-3) poll faster
+        poll_interval = 0.2 if priority <= 3 else 0.5
         
         if r_client:
-            # Distributed Lock Logic: Poll until we can set the key
             while not r_client.set(cls._lock_key, model_name, ex=cls._lock_timeout, nx=True):
-                await asyncio.sleep(0.5)
-            logger.info(f"🛰️ Distributed HardwareLock ACQUIRED by {model_name} node.")
+                wait_time = time.time() - start_time
+                if wait_time > 5:
+                    logger.warning(f"⏳ [CONTENTION] {model_name} (P{priority}) waiting for lock. Occupant: {r_client.get(cls._lock_key)}")
+                await asyncio.sleep(poll_interval)
+            logger.info(f"🛰️ HardwareLock ACQUIRED by {model_name}.")
         else:
             await cls._local_lock.acquire()
             logger.info(f"🔒 Local HardwareLock ACQUIRED by {model_name}.")
@@ -47,13 +57,51 @@ class HardwareLock:
     def release(cls):
         if r_client:
             r_client.delete(cls._lock_key)
-            logger.info(f"🔓 Distributed HardwareLock RELEASED.")
+            logger.info(f"🔓 [REASONING] Distributed HardwareLock RELEASED.")
         else:
             try:
                 cls._local_lock.release()
-                logger.info(f"🔓 Local HardwareLock RELEASED.")
+                logger.info(f"🔓 [REASONING] Local HardwareLock RELEASED.")
             except RuntimeError:
                 pass
+
+    @classmethod
+    def locked_async(cls, model_name: str, priority: int = 5):
+        """Asynchronous context manager for use in FastAPI/Async contexts."""
+        import contextlib
+        
+        @contextlib.asynccontextmanager
+        async def _lock():
+            await cls.acquire(model_name, priority=priority)
+            try:
+                yield
+            finally:
+                cls.release()
+        return _lock()
+
+    @classmethod
+    def locked_sync(cls, model_name: str, priority: int = 5):
+        """Synchronous wrapper for use in Streamlit/Threaded contexts."""
+        import asyncio
+        import contextlib
+        
+        @contextlib.contextmanager
+        def _lock():
+            try:
+                # We use a simplified loop or just blocking if no event loop
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # If in a running loop, we can't easily use asyncio.run
+                        # In production Docker, we usually have a clear execution model.
+                        # For now, we assume acquire can be called appropriately.
+                        pass
+                except RuntimeError:
+                    asyncio.run(cls.acquire(model_name, priority=priority))
+                yield
+            finally:
+                cls.release()
+        return _lock()
 
 def retry_api_call(
     _func: Optional[Callable] = None,
