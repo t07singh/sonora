@@ -10,6 +10,7 @@ services:
     volumes:
       - ./src:/app/src
       - ./sonora:/app/sonora
+      - ./api:/app/api
       - ./shared_data:/tmp/sonora
       - /teamspace/studios/this_studio/sonora_weights/models:/app/models
       - /teamspace/studios/this_studio/sonora_weights:/root/.cache
@@ -36,6 +37,7 @@ services:
     volumes:
       - ./src:/app/src
       - ./sonora:/app/sonora
+      - ./api:/app/api
       - ./shared_data:/tmp/sonora
       - /teamspace/studios/this_studio/sonora_weights/models:/app/models
       - /teamspace/studios/this_studio/sonora_weights:/root/.cache
