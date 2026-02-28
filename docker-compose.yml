@@ -18,9 +18,9 @@ services:
       - TRANSCRIBER_URL=http://sonora-transcriber:8001/transcribe
       - SYNTHESIZER_URL=http://sonora-synthesizer:8002/synthesize
       - REDIS_URL=redis://redis-cache:6379/0
-      - BACKEND_URL=http://sonora-api:8000
       - SHARED_PATH=/tmp/sonora
       - SONORA_MODE=production
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
     depends_on:
       - redis-cache
       - sonora-model-downloader
@@ -48,6 +48,7 @@ services:
       - SHARED_PATH=/tmp/sonora
       - SONORA_MODE=production
       - REGISTRY_PATH=/teamspace/studios/this_studio/sonora_weights/registry
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
     depends_on:
       - sonora-model-downloader
     networks:
