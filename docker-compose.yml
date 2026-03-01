@@ -3,6 +3,7 @@ version: '3.8'
 services:
   sonora-ui:
     container_name: sonora-ui
+    image: local-sonora-ui
     build:
       context: .
       dockerfile: Dockerfile.ui
@@ -32,6 +33,7 @@ services:
 
   sonora-api:
     container_name: sonora-api
+    image: local-sonora-api
     build:
       context: .
       dockerfile: Dockerfile.api
@@ -62,6 +64,7 @@ services:
 
   sonora-transcriber:
     container_name: sonora-transcriber
+    image: local-sonora-transcriber
     build:
       context: .
       dockerfile: src/services/transcriber/Dockerfile
@@ -94,6 +97,7 @@ services:
 
   sonora-separator:
     container_name: sonora-separator
+    image: local-sonora-separator
     build:
       context: .
       dockerfile: src/services/separator/Dockerfile
@@ -125,6 +129,7 @@ services:
 
   sonora-synthesizer:
     container_name: sonora-synthesizer
+    image: local-sonora-synthesizer
     build:
       context: .
       dockerfile: src/services/synthesizer/Dockerfile
