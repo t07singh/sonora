@@ -19,6 +19,8 @@ except ImportError as e:
         DEMUCS = "demucs"
         DEMUCS_V4 = "htdemucs"
         SPLEETER = "spleeter"
+        CLOUD_DEMUCS = "cloud_demucs"
+        SWARM_DEMUCS = "swarm_demucs"
     class AudioSeparator: 
         def __init__(self, **kwargs):
             self.model = "mock"
