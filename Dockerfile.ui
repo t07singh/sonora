@@ -10,8 +10,8 @@ RUN apt-get update && apt-get install -y \
 COPY requirements_ui.txt .
 RUN pip install --no-cache-dir -r requirements_ui.txt
 
-COPY src/core /app/src/core
-COPY src/cockpit /app/src/cockpit
+# Copy full project context so unified_demo.py and sonora package are available
+COPY . .
 
 ENV PYTHONPATH=/app
 ENV PROJECTS_BASE=/app/projects
