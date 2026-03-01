@@ -19,10 +19,13 @@ def main():
     print("Starting Sonora/Auralis AI Dubbing API Server")
     print("=" * 50)
     
-    # Check if we're in the right directory
-    if not Path("api/server.py").exists():
+    # Check if we're in the right directory or in Docker (/app)
+    is_docker = Path("/app/api/server.py").exists()
+    is_local = Path("api/server.py").exists()
+    
+    if not (is_docker or is_local):
         print("Error: api/server.py not found")
-        print("Please run this script from the sonora project root directory")
+        print("Please run this script from the sonora project root directory or ensure volume is mapped.")
         return
     
     # Check API keys
@@ -53,14 +56,13 @@ def main():
         import uvicorn
         
         # Add current directory to path for imports
-        current_dir = str(Path(__file__).parent)
+        current_dir = str(Path(__file__).resolve().parent)
         if current_dir not in sys.path:
             sys.path.insert(0, current_dir)
         
-        # Add parent directory to path to fix relative imports
-        parent_dir = str(Path(__file__).parent.parent)
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
+        # In Docker, we are mapped to /app
+        if "/app" not in sys.path:
+            sys.path.insert(0, "/app")
         
         # Try to import the app - first try direct import, then package import
         try:
