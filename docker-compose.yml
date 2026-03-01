@@ -3,7 +3,9 @@ version: '3.8'
 services:
   sonora-ui:
     container_name: sonora-ui
-    image: litcr.io/lit-container/roshnis0238/sonora-external-testing-project/sonora:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
     command: [ "streamlit", "run", "unified_demo.py", "--server.port=8501", "--server.address=0.0.0.0" ]
     ports:
       - "8501:8501"
@@ -30,7 +32,9 @@ services:
 
   sonora-api:
     container_name: sonora-api
-    image: litcr.io/lit-container/roshnis0238/sonora-external-testing-project/sonora:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.api
     command: [ "python", "run_server.py" ]
     ports:
       - "8000:8000"
@@ -58,7 +62,9 @@ services:
 
   sonora-transcriber:
     container_name: sonora-transcriber
-    image: litcr.io/lit-container/roshnis0238/sonora-external-testing-project/sonora:latest
+    build:
+      context: .
+      dockerfile: src/services/transcriber/Dockerfile
     command: [ "python", "src/services/transcriber/main.py" ]
     ports:
       - "8001:8001"
@@ -88,7 +94,9 @@ services:
 
   sonora-separator:
     container_name: sonora-separator
-    image: litcr.io/lit-container/roshnis0238/sonora-external-testing-project/sonora:latest
+    build:
+      context: .
+      dockerfile: src/services/separator/Dockerfile
     command: [ "python", "src/services/separator/main.py" ]
     ports:
       - "8003:8000"
@@ -117,7 +125,9 @@ services:
 
   sonora-synthesizer:
     container_name: sonora-synthesizer
-    image: litcr.io/lit-container/roshnis0238/sonora-external-testing-project/sonora:latest
+    build:
+      context: .
+      dockerfile: src/services/synthesizer/Dockerfile
     command: [ "python", "src/services/synthesizer/main.py" ]
     ports:
       - "8002:8002"
