@@ -82,13 +82,6 @@ services:
       - SONORA_MODE=production
     depends_on:
       - sonora-model-downloader
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
     networks:
       - sonora-network
 
@@ -113,13 +106,6 @@ services:
       - SONORA_MODE=production
     depends_on:
       - sonora-model-downloader
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
     networks:
       - sonora-network
 
@@ -143,13 +129,6 @@ services:
       - SHARED_PATH=/tmp/sonora
       - SONORA_MODE=production
       - REGISTRY_PATH=/teamspace/studios/this_studio/sonora_weights/registry
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
     networks:
       - sonora-network
 
