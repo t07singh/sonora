@@ -69,4 +69,4 @@ async def run_synthesis(request: SynthesisRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+    uvicorn.run(app, host="0.0.0.0", port=8002, timeout_keep_alive=1200)

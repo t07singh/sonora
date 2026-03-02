@@ -89,7 +89,8 @@ def main():
             host="0.0.0.0",
             port=8000,
             reload=False,  # Disable reload to avoid import issues
-            log_level="info"
+            log_level="info",
+            timeout_keep_alive=1200
         )
     except ImportError as e:
         print(f"Import error: {e}")

@@ -203,7 +203,7 @@ def render_dubbing_pipeline():
         with st.spinner("🕵️ Orchestrating Swarm: Running neural analysis..."):
             try:
                 files = {'file': open(st.session_state.current_file_path, 'rb')}
-                response = requests.post(ENDPOINTS["analyze"], files=files, timeout=120)
+                response = requests.post(ENDPOINTS["analyze"], files=files, timeout=1200) # Extended for CPU-based Swarm
                 if response.status_code == 200:
                     st.session_state.segments = response.json().get("segments")
                     st.success("Neural Analysis Complete. Script Editor Active.")
@@ -266,7 +266,7 @@ def render_dubbing_pipeline():
                         "voice_id": voice_id,
                         "video_path": st.session_state.current_file_path
                     }
-                    r = requests.post(ENDPOINTS["synthesize"], json=payload, timeout=300)
+                    r = requests.post(ENDPOINTS["synthesize"], json=payload, timeout=1200) # Extended for CPU-based Swarm
                     if r.status_code == 200:
                         master_path = r.json()['master_path']
                         st.success(f"✨ Dubbing Complete! Master saved to: {master_path}")
