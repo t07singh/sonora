@@ -47,7 +47,7 @@ class AnthropicTranslator:
         return message.content[0].text.strip()
 
 class GeminiTranslator:
-    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-2.0-flash-exp"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-1.5-flash"):
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         self.model = model
         self.client = None
