@@ -14,7 +14,7 @@ if api_key:
 
 try:
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash-exp")
+    model = genai.GenerativeModel("gemini-1.5-flash")
     print("DEBUG: Attempting to generate content...")
     response = model.generate_content("Translate 'Hello, how are you?' to Japanese. Respond only with the translation.")
     print(f"DEBUG: Success! Response: {response.text}")
