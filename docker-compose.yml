@@ -10,9 +10,7 @@ services:
     ports:
       - "8501:8501"
     volumes:
-      - ./src:/app/src
-      - ./sonora:/app/sonora
-      - ./api:/app/api
+      - .:/app
       - ./shared_data:/tmp/sonora
       - /teamspace/studios/this_studio/sonora_weights/models:/app/models
       - /teamspace/studios/this_studio/sonora_weights:/root/.cache
@@ -39,9 +37,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./src:/app/src
-      - ./sonora:/app/sonora
-      - ./api:/app/api
+      - .:/app
       - ./shared_data:/tmp/sonora
       - /teamspace/studios/this_studio/sonora_weights/models:/app/models
       - /teamspace/studios/this_studio/sonora_weights:/root/.cache
@@ -69,8 +65,7 @@ services:
     ports:
       - "8001:8001"
     volumes:
-      - ./src:/app/src
-      - ./sonora:/app/sonora
+      - .:/app
       - ./shared_data:/tmp/sonora
       - /teamspace/studios/this_studio/sonora_weights/models:/app/models
       - /teamspace/studios/this_studio/sonora_weights:/root/.cache
@@ -94,8 +89,7 @@ services:
     ports:
       - "8003:8000"
     volumes:
-      - ./src:/app/src
-      - ./sonora:/app/sonora
+      - .:/app
       - ./shared_data:/tmp/sonora
       - /teamspace/studios/this_studio/sonora_weights/models:/app/models
       - /teamspace/studios/this_studio/sonora_weights:/root/.cache
@@ -118,8 +112,7 @@ services:
     ports:
       - "8002:8002"
     volumes:
-      - ./src:/app/src
-      - ./sonora:/app/sonora
+      - .:/app
       - ./shared_data:/tmp/sonora
       - /teamspace/studios/this_studio/sonora_weights/models:/app/models
       - /teamspace/studios/this_studio/sonora_weights:/root/.cache
