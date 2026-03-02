@@ -100,4 +100,4 @@ async def process_audio(payload: dict):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8001, timeout_keep_alive=1200)
