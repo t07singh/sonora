@@ -89,7 +89,16 @@ async def analyze_media(file: UploadFile = File(...)):
         orch = SonoraOrchestrator(file_path)
         
         await manager.broadcast({"type": "status", "msg": "Whisper ASR: Running word-level extraction..."})
-        raw_words = await orch.run_transcription()
+        raw_segments = await orch.run_transcription()
+        
+        # Flatten words from segments for word-level isolation
+        raw_words = []
+        for s in raw_segments:
+            if s.get('words'):
+                raw_words.extend(s['words'])
+            else:
+                # Fallback if words are missing: treat segment as a single word
+                raw_words.append({"word": s['text'], "start": s['start'], "end": s['end']})
         
         segments_raw = group_words_by_pause(raw_words)
         
