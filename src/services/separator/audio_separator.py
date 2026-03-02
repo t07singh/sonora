@@ -176,7 +176,7 @@ class AudioSeparator:
                     # The payload expects 'filename' or 'rel_path'
                     # Since we are in the swarm, we assume the file is in SHARED_PATH
                     rel_path = os.path.basename(str(audio_path))
-                    response = requests.post(SEPARATOR_URL, json={"filename": rel_path}, timeout=600)
+                    response = requests.post(SEPARATOR_URL, json={"filename": rel_path}, timeout=1200) # Extended for CPU-based Swarm (20 mins)
                     if response.status_code == 200:
                         res = response.json()
                         v_path = res['vocals']

@@ -186,7 +186,7 @@ class SonoraOrchestrator:
                 
                 if sonora_mode == "production":
                     logger.info("🚀 PRODUCTION MODE: Calling Real Synthesis Service...")
-                    r = requests.post(SYNTH_URL, json=payload, timeout=30)
+                    r = requests.post(SYNTH_URL, json=payload, timeout=1200) # Extended for CPU-based Swarm (20 mins)
                     r.raise_for_status()
                     with open(take_path, "wb") as f: f.write(r.content)
                 else:

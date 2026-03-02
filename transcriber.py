@@ -63,7 +63,7 @@ class Transcriber:
             # we just need the relative path or the agreed shared path.
             payload = {"filename": audio_file}
             
-            response = requests.post(ASR_URL, json=payload, timeout=300) # Long timeout for large-v3
+            response = requests.post(ASR_URL, json=payload, timeout=1200) # Extended for CPU-based Swarm (20 mins)
             response.raise_for_status()
             
             result = response.json()
