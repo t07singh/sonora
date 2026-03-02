@@ -15,6 +15,8 @@ from pathlib import Path
 from sonora.utils.perf_timer import PerfTimer, time_function
 from sonora.utils.reliability import retry_api_call
 
+logger = logging.getLogger("sonora.transcriber")
+
 
 class Transcriber:
     """Hardened Local Transcriber using Faster-Whisper."""
@@ -25,7 +27,6 @@ class Transcriber:
         self.use_mock = os.getenv("SONORA_MOCK_MODE", "false").lower() == "true"
         self._model = None
         
-        logger = logging.getLogger("transcriber-local")
         logger.info(f"Initialized Transcriber (Model: {model_size}, Device: {self.device})")
 
     def _load_model(self):
