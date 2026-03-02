@@ -390,7 +390,7 @@ if uploaded:
                 API_BASE + "/api/dub/video", 
                 files=files, 
                 params=params,
-                timeout=300
+                timeout=1200
             )
             
             result = response.json()
@@ -449,7 +449,7 @@ if uploaded:
                     API_BASE + "/api/dub/video", 
                     files=files, 
                     params=params,
-                    timeout=300
+                    timeout=1200
                 )
                 
                 result = response.json()
