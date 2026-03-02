@@ -79,6 +79,13 @@ services:
       - sonora-model-downloader
     networks:
       - sonora-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]
 
   sonora-separator:
     container_name: sonora-separator
@@ -102,6 +109,13 @@ services:
       - sonora-model-downloader
     networks:
       - sonora-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]
 
   sonora-synthesizer:
     container_name: sonora-synthesizer
@@ -124,6 +138,13 @@ services:
       - REGISTRY_PATH=/teamspace/studios/this_studio/sonora_weights/registry
     networks:
       - sonora-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]
 
   redis-cache:
     image: "redis:alpine"

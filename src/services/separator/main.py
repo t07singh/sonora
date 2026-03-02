@@ -47,7 +47,8 @@ async def separate_audio(payload: dict = Body(...)):
             model = "htdemucs"
             
             # Construct arguments for demucs
-            args = ["-n", model, "-o", output_dir, input_path]
+            device = get_device()
+            args = ["-n", model, "-o", output_dir, "--device", device, input_path]
             
             # Execute separation
             demucs.separate.main(args)
