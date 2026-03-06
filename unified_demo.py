@@ -205,7 +205,7 @@ def render_dubbing_pipeline():
         dubbing_mode = c2.selectbox("Dubbing Mode", ["Fast (Streaming)", "High Quality (Batch)"])
     
     if st.button("🚀 Launch Dubbing Sequence", type="primary"):
-        with st.spinner("🕵️ Orchestrating Swarm: Running neural analysis..."):
+        with st.spinner("🕵️ Orchestrating Swarm: Neural Separation & Analysis..."):
             try:
                 files = {'file': open(st.session_state.current_file_path, 'rb')}
                 response = requests.post(ENDPOINTS["analyze"], files=files, timeout=1200) # Extended for CPU-based Swarm

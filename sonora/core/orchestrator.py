@@ -85,6 +85,33 @@ class SonoraOrchestrator:
         result = self.transcriber.transcribe(target_path)
         return result.get("segments", [])
 
+    async def run_separation(self) -> Dict[str, str]:
+        """
+        🌊 Neural Separation Step: Isolates Vocals vs BGM.
+        Always runs on the Swarm (sonora-separator) to save local resources.
+        """
+        logger.info(f"🌊 Orchestrator: Isolating stems for {self.audio_path}")
+        
+        # Use the separator microservice
+        sep_result = self.separator.separate_audio(self.audio_path)
+        
+        # Paths are managed by the shared volume /tmp/sonora
+        stems_dir = get_data_dir() / "stems"
+        os.makedirs(stems_dir, exist_ok=True)
+        
+        vocals_path = str(stems_dir / f"vocals_{os.path.basename(self.audio_path)}")
+        bgm_path = str(stems_dir / f"bgm_{os.path.basename(self.audio_path)}")
+        
+        # Save stems to shared disk
+        sf.write(vocals_path, sep_result.voice, sep_result.sample_rate)
+        sf.write(bgm_path, sep_result.music, sep_result.sample_rate)
+        
+        logger.info(f"✅ Separation Complete. Vocals: {vocals_path}")
+        return {
+            "vocals": vocals_path,
+            "bgm": bgm_path
+        }
+
     async def orchestrate_high_res_sequence(self, voice_id: str = "demo_char") -> str:
         """
         🚀 The Swarm Reasoner: High-Fidelity Sequence Managed by Gemini Task-Broker.
