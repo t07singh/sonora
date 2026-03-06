@@ -21,8 +21,8 @@ docker rm sonora-main-app >/dev/null 2>&1
 # - sonora-ui (8501) [Cockpit Frontend]
 # - sonora-model-downloader (Background Weight Pulling)
 
-echo "🚀 Launching Sonora Swarm Stack..."
-docker compose up -d
+echo "🚀 Launching Sonora Swarm Stack (Enforcing Build)..."
+docker compose up -d --build
 
 echo ""
 echo "✅ Swarm is launching in the background."

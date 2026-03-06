@@ -2,7 +2,12 @@
 import streamlit as st
 import os
 import sys
+import asyncio
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Ensure project root is in path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -28,6 +33,14 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+def save_uploaded_file(uploaded_file):
+    """Saves an uploaded file to a temporary directory and returns the path."""
+    temp_dir = Path(current_dir) / "data" / "temp"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    file_path = temp_dir / uploaded_file.name
+    with open(file_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    return str(file_path)
 
 def main():
     st.sidebar.title("Navigation")
@@ -73,14 +86,19 @@ def render_studio_page():
     if st.session_state.segments is None:
         if st.button("🔍 Run Isometric Analysis", type="primary"):
             with st.spinner("🕵️ Analyzing dialogue flaps..."):
-                orchestrator = SonoraOrchestrator(video_file)
-                raw_data = orchestrator.run_transcription()
+                # Save file to disk because FFmpeg needs a real path
+                video_path = save_uploaded_file(video_file)
+                st.session_state.video_path = video_path
+                
+                orchestrator = SonoraOrchestrator(video_path)
+                # Wrap async calls
+                raw_data = asyncio.run(orchestrator.run_transcription())
                 st.session_state.segments = group_words_by_pause(raw_data)
                 st.session_state.secure_path = orchestrator.audio_path
                 
                 translations = []
                 for seg in st.session_state.segments:
-                    translations.append(orchestrator.translate_segment(seg, char_tone))
+                    translations.append(asyncio.run(orchestrator.translate_segment(seg, char_tone)))
                 st.session_state.translations = translations
                 st.rerun()
 
@@ -115,8 +133,9 @@ def render_studio_page():
                 else:
                     st.markdown(f"<p class='sync-drift'>⚠️ DRIFT ({current_flaps})</p>", unsafe_allow_html=True)
                     if st.button("🪄 Refactor", key=f"fix_{idx}"):
-                        orch = SonoraOrchestrator(st.session_state.secure_path)
-                        st.session_state.translations[idx] = orch.refactor_line(st.session_state.translations[idx], target_flaps, char_tone)
+                        orch = SonoraOrchestrator(st.session_state.video_path)
+                        # Wrap async call
+                        st.session_state.translations[idx] = asyncio.run(orch.refactor_line(st.session_state.translations[idx], target_flaps, char_tone))
                         st.rerun()
 
         # Final Render Section
@@ -124,23 +143,43 @@ def render_studio_page():
         if st.button("🎬 RENDER FINAL STUDIO MASTER", type="primary", use_container_width=True):
             with st.spinner("Executing Final Assembly Pipeline..."):
                 try:
-                    orch = SonoraOrchestrator(st.session_state.secure_path)
-                    final_path = orch.assemble_final_dub(
+                    orch = SonoraOrchestrator(st.session_state.video_path)
+                    
+                    # 1. Synthesize segments first to get audio takes
+                    st.write("🎙️ Synthesizing Dubbed Takes...")
+                    takes = asyncio.run(orch.synthesize_segments(
                         st.session_state.segments, 
                         st.session_state.translations,
                         voice_id=st.session_state.voice_id
-                    )
+                    ))
+                    
+                    # 2. Assemble final dub
+                    st.write("🏗️ Assembling Final Master...")
+                    final_path = asyncio.run(orch.assemble_final_dub(
+                        st.session_state.video_path,
+                        takes,
+                        st.session_state.segments
+                    ))
+                    
                     st.session_state.last_master = final_path
                     st.success("🎉 Rendering Complete!")
                     st.balloons()
                 except Exception as e:
                     st.error(f"Render Failure: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
         
         if 'last_master' in st.session_state:
-            st.video(st.session_state.last_master)
-            with open(st.session_state.last_master, "rb") as f:
-                st.download_button("📥 Download Dubbed Master", f, file_name=f"sonora_dub_{video_file.name}")
+            if os.path.exists(st.session_state.last_master):
+                st.video(st.session_state.last_master)
+                with open(st.session_state.last_master, "rb") as f:
+                    st.download_button("📥 Download Dubbed Master", f, file_name=f"sonora_dub_{video_file.name}")
+            else:
+                st.error("Master file not found on disk.")
         st.markdown('</div>', unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()

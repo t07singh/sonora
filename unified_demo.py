@@ -3,6 +3,11 @@ import sys
 import os
 import time
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
 import requests
 import librosa
 import numpy as np
@@ -251,6 +256,8 @@ def render_dubbing_pipeline():
                             if r.status_code == 200:
                                 st.session_state.segments[i]['translation'] = r.json()['text']
                                 st.rerun()
+                            else:
+                                st.error(f"Refactor Failed: {r.text}")
         
         # --- FINAL SYNTHESIS & MIX ---
         st.divider()

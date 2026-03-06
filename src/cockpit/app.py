@@ -7,6 +7,10 @@ import time
 import pandas as pd
 import plotly.express as px
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 from src.core.path_manager import ensure_shared_workspace, resolve_shared_path, get_relative_shared_path
 
 # --- CONFIG ---
