@@ -1,8 +1,14 @@
 import os
 import logging
-from typing import Optional, Literal
+import time
+import functools
+from typing import Optional, Literal, List, Dict, Any, Union
 from openai import OpenAI
 from sonora.utils.reliability import retry_api_call
+from dotenv import load_dotenv
+
+# Force load environment
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -97,9 +103,13 @@ class HardenedTranslator:
         self.provider = provider
         self.mock_mode = False
 
-        if self.provider == "gemini" and not os.getenv("GEMINI_API_KEY"):
-            logger.warning("No GEMINI_API_KEY found. Falling back to MOCK mode.")
+        gemini_key = os.getenv("GEMINI_API_KEY")
+        if self.provider == "gemini" and not gemini_key:
+            logger.warning("❌ No GEMINI_API_KEY found in environment. Falling back to MOCK mode.")
             self.mock_mode = True
+        elif self.provider == "gemini":
+            logger.info(f"✅ GEMINI_API_KEY detected (starts with {gemini_key[:4]}...). Neural Link Ready.")
+            self.mock_mode = False
         
         if not self.mock_mode and not hasattr(self, 'translator'):
             if self.provider == "openai":
