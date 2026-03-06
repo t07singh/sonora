@@ -88,8 +88,14 @@ async def analyze_media(file: UploadFile = File(...)):
 
         orch = SonoraOrchestrator(file_path)
         
-        await manager.broadcast({"type": "status", "msg": "Whisper ASR: Running word-level extraction..."})
-        raw_segments = await orch.run_transcription()
+        # 1. STEM SEPARATION (Demucs v4)
+        await manager.broadcast({"type": "status", "msg": "Neural Separation: Isolating vocal and background stems..."})
+        stems = await orch.run_separation()
+        vocals_path = stems["vocals"]
+        
+        # 2. WHISPER ASR (On Clean Vocals)
+        await manager.broadcast({"type": "status", "msg": "Whisper ASR: Running word-level extraction on clean stems..."})
+        raw_segments = await orch.run_transcription(vocals_path)
         
         # Flatten words from segments for word-level isolation
         raw_words = []
