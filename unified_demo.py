@@ -105,6 +105,10 @@ ENDPOINTS = {
     "cache_stats": f"{API_BASE}/api/cache/stats"
 }
 
+# Auth Header for Neural Swarm
+AUTH_KEY = os.getenv("SONORA_API_KEY", "admin123")
+HEADERS = {"X-Sonora-Key": AUTH_KEY}
+
 # ================= HELPER CLASSES =================
 class ExtendedAudioEditor(AudioEditorUI):
     def load_from_path(self, file_path):
@@ -171,7 +175,7 @@ def render_dashboard():
     
     c1, c2, c3 = st.columns(3)
     try:
-        r = requests.get(ENDPOINTS["health"], timeout=2)
+        r = requests.get(ENDPOINTS["health"], headers=HEADERS, timeout=2)
         status_color = "status-online" if r.status_code == 200 else "status-offline"
         status_text = "ONLINE" if r.status_code == 200 else "OFFLINE"
     except:
@@ -185,7 +189,7 @@ def render_dashboard():
     
     st.markdown("### 📈 Recent Activity")
     try:
-        metrics = requests.get(ENDPOINTS["metrics"], timeout=3).json()
+        metrics = requests.get(ENDPOINTS["metrics"], headers=HEADERS, timeout=3).json()
         m1, m2, m3 = st.columns(3)
         m1.metric("Total Requests", metrics.get('total_requests', 0))
         m2.metric("Processing Errors", metrics.get('total_errors', 0))
@@ -208,7 +212,7 @@ def render_dubbing_pipeline():
         with st.spinner("🕵️ Orchestrating Swarm: Neural Separation & Analysis..."):
             try:
                 files = {'file': open(st.session_state.current_file_path, 'rb')}
-                response = requests.post(ENDPOINTS["analyze"], files=files, timeout=1200) # Extended for CPU-based Swarm
+                response = requests.post(ENDPOINTS["analyze"], files=files, headers=HEADERS, timeout=1200) # Extended for CPU-based Swarm
                 if response.status_code == 200:
                     st.session_state.segments = response.json().get("segments")
                     st.success("Neural Analysis Complete. Script Editor Active.")
@@ -252,7 +256,7 @@ def render_dubbing_pipeline():
                                 "target_syllables": seg.get('targetFlaps', 10),
                                 "style": "Anime"
                             }
-                            r = requests.post(ENDPOINTS["refactor"], json=payload)
+                            r = requests.post(ENDPOINTS["refactor"], json=payload, headers=HEADERS)
                             if r.status_code == 200:
                                 st.session_state.segments[i]['translation'] = r.json()['text']
                                 st.rerun()
@@ -273,7 +277,7 @@ def render_dubbing_pipeline():
                         "voice_id": voice_id,
                         "video_path": st.session_state.current_file_path
                     }
-                    r = requests.post(ENDPOINTS["synthesize"], json=payload, timeout=1200) # Extended for CPU-based Swarm
+                    r = requests.post(ENDPOINTS["synthesize"], json=payload, headers=HEADERS, timeout=1200) # Extended for CPU-based Swarm
                     if r.status_code == 200:
                         master_path = r.json()['master_path']
                         st.success(f"✨ Dubbing Complete! Master saved to: {master_path}")
@@ -389,7 +393,7 @@ def render_system_health():
     st.markdown("---")
     st.subheader("Cache Performance")
     try:
-        stats = requests.get(ENDPOINTS["cache_stats"], timeout=2).json()
+        stats = requests.get(ENDPOINTS["cache_stats"], headers=HEADERS, timeout=2).json()
         st.json(stats)
     except:
         st.error("Cache API unreachable")
