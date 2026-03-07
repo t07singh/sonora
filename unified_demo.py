@@ -106,7 +106,7 @@ ENDPOINTS = {
 }
 
 # Auth Header for Neural Swarm
-AUTH_KEY = os.getenv("SONORA_API_KEY", "admin123")
+AUTH_KEY = os.getenv("SONORA_API_KEY", "admin123").strip()
 HEADERS = {"X-Sonora-Key": AUTH_KEY}
 
 # ================= HELPER CLASSES =================
