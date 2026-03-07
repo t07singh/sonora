@@ -15,27 +15,27 @@ class SonoraAuthMiddleware(BaseHTTPMiddleware):
         if request.url.path in ["/health", "/docs", "/openapi.json", "/"]:
             return await call_next(request)
         
-        # 2. Whitelist WebSocket (handled separately or via this if headers supported)
+        # 2. Whitelist WebSocket
         if "ws" in request.url.path:
              return await call_next(request)
 
-        # 3. Check for API Key
-        expected_key = os.getenv("SONORA_API_KEY")
+        # 3. Check for API Key with fallback and stripping
+        expected_key = os.getenv("SONORA_API_KEY", "admin123").strip()
+        client_key = request.headers.get(API_KEY_NAME, "").strip()
         
+        # Diagnostic Log (Masked)
         if not expected_key:
-            # Dev Mode: Warn but allow if no key configured
-            # logger.warning("SECURITY ALERT: No SONORA_API_KEY set. Allowing request.")
-            return await call_next(request)
-            
-        client_key = request.headers.get(API_KEY_NAME)
-        
-        if not client_key or not secrets.compare_digest(client_key, expected_key):
-            logger.warning(f"SECURITY BLOCK: Unauthorized access attempt from {request.client.host}")
+             logger.warning("SECURITY ALERT: SONORA_API_KEY is empty. Hardening to 'admin123'.")
+             expected_key = "admin123"
+
+        if not secrets.compare_digest(client_key, expected_key):
+            logger.warning(f"SECURITY BLOCK: Unauthorized access attempt. Expected starts with {expected_key[:2]}..., got {client_key[:2]}...")
             return JSONResponse(
                 status_code=403, 
                 content={
                     "detail": "Sonora Security Block: Invalid or Missing API Key",
-                    "required_header": API_KEY_NAME
+                    "required_header": API_KEY_NAME,
+                    "debug_hint": "Check SONORA_API_KEY in .env and Ensure UI/API are synced."
                 }
             )
             
