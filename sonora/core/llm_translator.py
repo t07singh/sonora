@@ -61,7 +61,17 @@ class GeminiTranslator:
         try:
             import google.generativeai as genai
             genai.configure(api_key=self.api_key)
-            self.client = genai.GenerativeModel(self.model)
+            # Use generation_config and safety_settings for production reliability
+            self.client = genai.GenerativeModel(
+                model_name=self.model,
+                generation_config={"temperature": 0.1},
+                safety_settings={
+                    "HARM_CATEGORY_HARASSMENT": "BLOCK_NONE",
+                    "HARM_CATEGORY_HATE_SPEECH": "BLOCK_NONE",
+                    "HARM_CATEGORY_SEXUALLY_EXPLICIT": "BLOCK_NONE",
+                    "HARM_CATEGORY_DANGEROUS_CONTENT": "BLOCK_NONE",
+                }
+            )
             logger.info(f"Initialized Gemini translator with model: {self.model}")
         except ImportError:
             logger.warning("google-generativeai package not installed. GeminiTranslator will fail.")
@@ -79,9 +89,15 @@ class GeminiTranslator:
             return response.text.strip()
         except Exception as e:
             if self.model == "gemini-1.5-flash":
-                logger.warning(f"Gemini 1.5-Flash failed: {e}. Falling back to 1.0-Pro...")
+                logger.warning(f"Gemini 1.5-Flash failed: {e}. Falling back to 1.5-Pro...")
                 import google.generativeai as genai
-                self.model = "gemini-1.0-pro"
+                self.model = "gemini-1.5-pro"
+                self.client = genai.GenerativeModel(self.model)
+                return self.translate(prompt)
+            elif self.model == "gemini-1.5-pro":
+                logger.warning(f"Gemini 1.5-Pro failed: {e}. Falling back to legacy gemini-pro...")
+                import google.generativeai as genai
+                self.model = "gemini-pro"
                 self.client = genai.GenerativeModel(self.model)
                 return self.translate(prompt)
             raise e
@@ -145,4 +161,4 @@ class HardenedTranslator:
         except Exception as e:
             logger.error(f"Cloud translation completely failed: {e}")
             # Final fallback to mock with diagnostic error
-            return f"[FALLBACK MOCK] Error: {str(e)[:50]}"
+            return f"[FALLBACK MOCK] Error: {str(e)[:100]}"
