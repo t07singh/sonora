@@ -70,12 +70,21 @@ class GeminiTranslator:
 
     @retry_api_call(max_retries=3, base_delay=1)
     def translate(self, prompt: str) -> str:
-        """Translates text using Google Gemini with robust retries."""
+        """Translates text using Google Gemini with model fallback."""
         if not self.client:
             raise ImportError("Gemini client not initialized.")
             
-        response = self.client.generate_content(prompt)
-        return response.text.strip()
+        try:
+            response = self.client.generate_content(prompt)
+            return response.text.strip()
+        except Exception as e:
+            if self.model == "gemini-1.5-flash":
+                logger.warning(f"Gemini 1.5-Flash failed: {e}. Falling back to 1.0-Pro...")
+                import google.generativeai as genai
+                self.model = "gemini-1.0-pro"
+                self.client = genai.GenerativeModel(self.model)
+                return self.translate(prompt)
+            raise e
 
 class LocalQwenProvider:
     def __init__(self, model_path: str = "models/qwen7b"):
@@ -134,7 +143,6 @@ class HardenedTranslator:
             # Internal retries (1s, 2s, 4s) happen inside this call
             return self.translator.translate(prompt)
         except Exception as e:
-            logger.error(f"Cloud translation completely failed after 3 attempts: {e}")
-            # Final fallback to mock
-            logger.warning("Falling back to MOCK mode due to API failure")
-            return f"[FALLBACK MOCK] Translation unavailable"
+            logger.error(f"Cloud translation completely failed: {e}")
+            # Final fallback to mock with diagnostic error
+            return f"[FALLBACK MOCK] Error: {str(e)[:50]}"
