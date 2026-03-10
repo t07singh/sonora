@@ -53,7 +53,7 @@ class AnthropicTranslator:
         return message.content[0].text.strip()
 
 class GeminiTranslator:
-    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-1.5-flash"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-2.0-flash"):
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         self.model = model
         self.client = None
@@ -61,7 +61,7 @@ class GeminiTranslator:
         try:
             import google.generativeai as genai
             genai.configure(api_key=self.api_key)
-            # Use generation_config and safety_settings for production reliability
+            # Verified models from Cloud Probe: gemini-2.0-flash, gemini-flash-latest, gemini-pro-latest
             self.client = genai.GenerativeModel(
                 model_name=self.model,
                 generation_config={"temperature": 0.1},
@@ -72,7 +72,7 @@ class GeminiTranslator:
                     "HARM_CATEGORY_DANGEROUS_CONTENT": "BLOCK_NONE",
                 }
             )
-            logger.info(f"Initialized Gemini translator with model: {self.model}")
+            logger.info(f"Initialized Gemini translator with verified model: {self.model}")
         except ImportError:
             logger.warning("google-generativeai package not installed. GeminiTranslator will fail.")
         except Exception as e:
@@ -80,7 +80,7 @@ class GeminiTranslator:
 
     @retry_api_call(max_retries=3, base_delay=1)
     def translate(self, prompt: str) -> str:
-        """Translates text using Google Gemini with model fallback."""
+        """Translates text using Google Gemini with verified model fallback."""
         if not self.client:
             raise ImportError("Gemini client not initialized.")
             
@@ -88,19 +88,19 @@ class GeminiTranslator:
             response = self.client.generate_content(prompt)
             return response.text.strip()
         except Exception as e:
-            if self.model == "gemini-1.5-flash":
-                logger.warning(f"Gemini 1.5-Flash failed: {e}. Falling back to 1.5-Pro...")
-                import google.generativeai as genai
-                self.model = "gemini-1.5-pro"
-                self.client = genai.GenerativeModel(self.model)
-                return self.translate(prompt)
-            elif self.model == "gemini-1.5-pro":
-                logger.warning(f"Gemini 1.5-Pro failed: {e}. Falling back to legacy gemini-pro...")
-                import google.generativeai as genai
-                self.model = "gemini-pro"
-                self.client = genai.GenerativeModel(self.model)
-                return self.translate(prompt)
-            raise e
+            # Fallback chain based on verified Cloud Probe results
+            import google.generativeai as genai
+            if self.model == "gemini-2.0-flash":
+                logger.warning(f"Gemini 2.0-Flash failed: {e}. Falling back to gemini-flash-latest...")
+                self.model = "gemini-flash-latest"
+            elif self.model == "gemini-flash-latest":
+                logger.warning(f"Gemini-Flash-Latest failed: {e}. Falling back to gemini-pro-latest...")
+                self.model = "gemini-pro-latest"
+            else:
+                raise e # End of verified chain
+                
+            self.client = genai.GenerativeModel(self.model)
+            return self.translate(prompt)
 
 class LocalQwenProvider:
     def __init__(self, model_path: str = "models/qwen7b"):
