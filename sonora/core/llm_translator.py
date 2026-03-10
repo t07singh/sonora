@@ -103,7 +103,7 @@ class GeminiTranslator:
             self.client = genai.GenerativeModel(self.model)
             return self.translate(prompt)
 
-    @retry_api_call(max_retries=3, base_delay=2)
+    @retry_api_call(max_retries=10, base_delay=2)
     def translate_batch(self, prompts: List[str]) -> List[str]:
         """Translates a batch of texts in a single call for RPM efficiency."""
         if not self.client:
