@@ -3,6 +3,7 @@ import json
 import logging
 import subprocess
 import time
+import asyncio
 import torch
 import gc
 import soundfile as sf
@@ -177,6 +178,34 @@ class SonoraOrchestrator:
             f"Text: {text}"
         )
         return self.translator.translate(prompt)
+
+    async def translate_segments_batch(self, segments_raw: List[List[Dict]], style: str = "Anime") -> List[str]:
+        """Translates a list of segments in batches for high-speed analysis."""
+        all_translations = []
+        batch_size = 20 # 20 segments per Gemini call
+        
+        for i in range(0, len(segments_raw), batch_size):
+            batch_segments = segments_raw[i : i + batch_size]
+            batch_prompts = []
+            
+            for seg in batch_segments:
+                text = " ".join([w.get('word', w.get('text', '')) for w in seg])
+                target_syllables = estimate_japanese_morae(text)
+                prompt = (
+                    f"Translate to English ({style} style). "
+                    f"Requirement: EXACTLY {target_syllables} syllables. "
+                    f"Text: {text}"
+                )
+                batch_prompts.append(prompt)
+            
+            logger.info(f"🧠 [BATCH] Translating segments {i+1} to {i+len(batch_segments)}...")
+            translations = self.translator.translate_batch(batch_prompts)
+            all_translations.extend(translations)
+            
+            # Anti-429 delay
+            await asyncio.sleep(1.0)
+            
+        return all_translations
 
     async def refactor_line(self, text: str, target_syllables: int, style: str) -> str:
         """Refines a line to match target syllable count."""

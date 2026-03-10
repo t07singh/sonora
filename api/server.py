@@ -108,14 +108,15 @@ async def analyze_media(file: UploadFile = File(...)):
         
         segments_raw = group_words_by_pause(raw_words)
         
+        await manager.broadcast({"type": "status", "msg": f"Neural Link: Batch Translating {len(segments_raw)} segments..."})
+        translations = await orch.translate_segments_batch(segments_raw)
+        
         formatted_segments = []
         for i, seg in enumerate(segments_raw):
-            await manager.broadcast({"type": "status", "msg": f"Context Engine: Processing Segment {i+1}..."})
-            
             speaker_id = "HIRO" if i % 2 == 0 else "SAKURA"
             voice_type = "Heroic / Shonen" if i % 2 == 0 else "High-Pitch / Feminine"
             original_text = " ".join([w['word'] for w in seg])
-            translated_text = await orch.translate_segment(seg)
+            translated_text = translations[i] if i < len(translations) else "[ERROR]"
             
             formatted_segments.append({
                 "id": str(i),

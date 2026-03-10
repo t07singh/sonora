@@ -3,6 +3,7 @@ import logging
 import time
 import functools
 from typing import Optional, Literal, List, Dict, Any, Union
+import json
 from openai import OpenAI
 from sonora.utils.reliability import retry_api_call
 from dotenv import load_dotenv
@@ -102,6 +103,37 @@ class GeminiTranslator:
             self.client = genai.GenerativeModel(self.model)
             return self.translate(prompt)
 
+    @retry_api_call(max_retries=3, base_delay=2)
+    def translate_batch(self, prompts: List[str]) -> List[str]:
+        """Translates a batch of texts in a single call for RPM efficiency."""
+        if not self.client:
+            raise ImportError("Gemini client not initialized.")
+            
+        # Structure the batch prompt as a JSON-request for reliability
+        batch_prompt = (
+            "You are a batch translation engine. Translate the following array of segments into English. "
+            "Maintain the requested syllable counts exactly. Respond ONLY with a JSON array of strings.\n\n"
+            f"Segments: {prompts}"
+        )
+        
+        try:
+            response = self.client.generate_content(batch_prompt)
+            text = response.text.strip()
+            # Clean up potential markdown formatting
+            if "```json" in text:
+                text = text.split("```json")[-1].split("```")[0].strip()
+            elif "```" in text:
+                text = text.split("```")[-1].split("```")[0].strip()
+                
+            results = json.loads(text)
+            if isinstance(results, list) and len(results) == len(prompts):
+                return results
+            return [f"[BATCH ERROR] {p[:20]}..." for p in prompts]
+        except Exception as e:
+            logger.error(f"Gemini Batch Translation failed: {e}")
+            # Individual fallback if batch fails
+            return [self.translate(p) for p in prompts]
+
 class LocalQwenProvider:
     def __init__(self, model_path: str = "models/qwen7b"):
         self.model_path = model_path
@@ -161,4 +193,16 @@ class HardenedTranslator:
         except Exception as e:
             logger.error(f"Cloud translation completely failed: {e}")
             # Final fallback to mock with diagnostic error
-            return f"[FALLBACK MOCK] Error: {str(e)[:100]}"
+            if "quota" in str(e).lower():
+                return f"[RATE LIMIT] Gemini Busy - Retrying..."
+            return f"[ERROR] {str(e)[:50]}..."
+
+    def translate_batch(self, prompts: List[str]) -> List[str]:
+        if self.mock_mode:
+            return [f"[MOCK BATCH] {p[:20]}" for p in prompts]
+            
+        if hasattr(self.translator, 'translate_batch'):
+            return self.translator.translate_batch(prompts)
+            
+        # Serial fallback if provider doesn't support batching
+        return [self.translate(p) for p in prompts]
