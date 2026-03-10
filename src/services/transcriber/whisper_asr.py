@@ -63,7 +63,7 @@ class WhisperASR:
             response = requests.post(
                 f"{self.service_url}/transcribe",
                 json={"audio_path": audio_filename},
-                timeout=1200 # Whisper can take significant time for long clips (Extended to 20 mins)
+                timeout=3600 # Extended to 1 hour for CPU-based Swarm
             )
             response.raise_for_status()
             result = response.json()

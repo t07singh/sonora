@@ -212,7 +212,7 @@ def render_dubbing_pipeline():
         with st.spinner("🕵️ Orchestrating Swarm: Neural Separation & Analysis..."):
             try:
                 files = {'file': open(st.session_state.current_file_path, 'rb')}
-                response = requests.post(ENDPOINTS["analyze"], files=files, headers=HEADERS, timeout=1200) # Extended for CPU-based Swarm
+                response = requests.post(ENDPOINTS["analyze"], files=files, headers=HEADERS, timeout=3600) # Extended for CPU-based Swarm (1 hour)
                 if response.status_code == 200:
                     st.session_state.segments = response.json().get("segments")
                     st.success("Neural Analysis Complete. Script Editor Active.")
