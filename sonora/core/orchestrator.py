@@ -7,7 +7,7 @@ import asyncio
 import torch
 import gc
 import soundfile as sf
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Callable
 from sonora.audio_editing.path_manager import get_data_dir, get_secure_path
 from sonora.core.reliability import HardwareLock
 
