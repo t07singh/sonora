@@ -82,8 +82,8 @@ class SonoraOrchestrator:
         """Calls the sonora-transcriber microservice."""
         target_path = path or self.audio_path
         logger.info(f"🎙️ Orchestrator: Triggering ASR for {target_path}")
-        # Transcriber.transcribe handles the microservice handshake
-        result = self.transcriber.transcribe(target_path)
+        # Transcriber.transcribe is a blocking requests call; wrap in thread
+        result = await asyncio.to_thread(self.transcriber.transcribe, target_path)
         return result.get("segments", [])
 
     async def run_separation(self) -> Dict[str, str]:
@@ -93,8 +93,8 @@ class SonoraOrchestrator:
         """
         logger.info(f"🌊 Orchestrator: Isolating stems for {self.audio_path}")
         
-        # Use the separator microservice
-        sep_result = self.separator.separate_audio(self.audio_path)
+        # AudioSeparator.separate_audio is a blocking requests call; wrap in thread
+        sep_result = await asyncio.to_thread(self.separator.separate_audio, self.audio_path)
         
         # Paths are managed by the shared volume /tmp/sonora
         stems_dir = get_data_dir() / "stems"
@@ -199,7 +199,7 @@ class SonoraOrchestrator:
                 batch_prompts.append(prompt)
             
             logger.info(f"🧠 [BATCH] Translating segments {i+1} to {i+len(batch_segments)}...")
-            translations = self.translator.translate_batch(batch_prompts)
+            translations = await asyncio.to_thread(self.translator.translate_batch, batch_prompts)
             all_translations.extend(translations)
             
             # Anti-429 delay
