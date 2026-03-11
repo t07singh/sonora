@@ -75,40 +75,41 @@ class SynthesizeRequest(BaseModel):
 async def health_check():
     return {"status": "ok", "service": "sonora-backend", "mode": "swarm_intelligence"}
 
-@app.post("/api/analyze")
-async def analyze_media(file: UploadFile = File(...)):
-    try:
-        await manager.broadcast({"type": "status", "msg": f"Neural Handshake: Ingesting {file.filename}..."})
-        
-        temp_dir = "sonora/data/temp"
-        os.makedirs(temp_dir, exist_ok=True)
-        file_path = os.path.join(temp_dir, file.filename)
-        with open(file_path, "wb") as buffer:
-            buffer.write(await file.read())
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Body, BackgroundTasks
+import uuid
 
+# --- Job Storage ---
+analysis_jobs = {}
+
+# --- Helper for Background Processing ---
+async def background_analysis(job_id: str, file_path: str, filename: str):
+    try:
+        analysis_jobs[job_id]["status"] = "Neural Separation: Isolating stems..."
+        await manager.broadcast({"type": "status", "msg": analysis_jobs[job_id]["status"], "job_id": job_id})
+        
         orch = SonoraOrchestrator(file_path)
         
-        # 1. STEM SEPARATION (Demucs v4)
-        await manager.broadcast({"type": "status", "msg": "Neural Separation: Isolating vocal and background stems..."})
+        # 1. STEM SEPARATION
         stems = await orch.run_separation()
         vocals_path = stems["vocals"]
         
-        # 2. WHISPER ASR (On Clean Vocals)
-        await manager.broadcast({"type": "status", "msg": "Whisper ASR: Running word-level extraction on clean stems..."})
+        # 2. WHISPER ASR
+        analysis_jobs[job_id]["status"] = "Whisper ASR: Running word-level extraction..."
+        await manager.broadcast({"type": "status", "msg": analysis_jobs[job_id]["status"], "job_id": job_id})
         raw_segments = await orch.run_transcription(vocals_path)
         
-        # Flatten words from segments for word-level isolation
         raw_words = []
         for s in raw_segments:
             if s.get('words'):
                 raw_words.extend(s['words'])
             else:
-                # Fallback if words are missing: treat segment as a single word
                 raw_words.append({"word": s['text'], "start": s['start'], "end": s['end']})
         
         segments_raw = group_words_by_pause(raw_words)
         
-        await manager.broadcast({"type": "status", "msg": f"Neural Link: Batch Translating {len(segments_raw)} segments..."})
+        # 3. TRANSLATION
+        analysis_jobs[job_id]["status"] = f"Neural Link: Batch Translating {len(segments_raw)} segments..."
+        await manager.broadcast({"type": "status", "msg": analysis_jobs[job_id]["status"], "job_id": job_id})
         translations = await orch.translate_segments_batch(segments_raw)
         
         formatted_segments = []
@@ -134,13 +135,41 @@ async def analyze_media(file: UploadFile = File(...)):
                 "artifacts": []
             })
             
-        await manager.broadcast({"type": "status", "msg": "Neural Link: Analysis Complete.", "success": True})
-        return {"segments": formatted_segments}
+        analysis_jobs[job_id]["status"] = "Complete"
+        analysis_jobs[job_id]["result"] = {"segments": formatted_segments}
+        await manager.broadcast({"type": "status", "msg": "Neural Link: Analysis Complete.", "success": True, "job_id": job_id})
         
     except Exception as e:
         error_msg = f"Neural Link Error: {str(e)}"
-        await manager.broadcast({"type": "status", "msg": error_msg, "error": True})
-        raise HTTPException(status_code=500, detail=error_msg)
+        analysis_jobs[job_id]["status"] = "Error"
+        analysis_jobs[job_id]["error"] = error_msg
+        await manager.broadcast({"type": "status", "msg": error_msg, "error": True, "job_id": job_id})
+
+@app.post("/api/analyze")
+async def analyze_media(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    job_id = str(uuid.uuid4())
+    temp_dir = "sonora/data/temp"
+    os.makedirs(temp_dir, exist_ok=True)
+    file_path = os.path.join(temp_dir, file.filename)
+    
+    with open(file_path, "wb") as buffer:
+        buffer.write(await file.read())
+        
+    analysis_jobs[job_id] = {
+        "status": "Starting...",
+        "filename": file.filename,
+        "result": None,
+        "error": None
+    }
+    
+    background_tasks.add_task(background_analysis, job_id, file_path, file.filename)
+    return {"job_id": job_id, "status": "Queued"}
+
+@app.get("/api/job/{job_id}")
+async def get_job_status(job_id: str):
+    if job_id not in analysis_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return analysis_jobs[job_id]
 
 @app.post("/api/refactor")
 async def refactor_segment(req: RefactorRequest):

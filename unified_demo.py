@@ -209,16 +209,37 @@ def render_dubbing_pipeline():
         dubbing_mode = c2.selectbox("Dubbing Mode", ["Fast (Streaming)", "High Quality (Batch)"])
     
     if st.button("🚀 Launch Dubbing Sequence", type="primary"):
-        with st.spinner("🕵️ Orchestrating Swarm: Neural Separation & Analysis..."):
+        status_placeholder = st.empty()
+        with st.status("🕵️ Swarm Intelligence: Analyzing Content...", expanded=True) as status_box:
             try:
                 files = {'file': open(st.session_state.current_file_path, 'rb')}
-                response = requests.post(ENDPOINTS["analyze"], files=files, headers=HEADERS, timeout=3600) # Extended for CPU-based Swarm (1 hour)
+                # 1. Trigger Async Job
+                response = requests.post(ENDPOINTS["analyze"], files=files, headers=HEADERS, timeout=60)
                 if response.status_code == 200:
-                    st.session_state.segments = response.json().get("segments")
-                    st.success("Neural Analysis Complete. Script Editor Active.")
-                    st.rerun()
+                    job_data = response.json()
+                    job_id = job_data.get("job_id")
+                    status_box.write(f"🧬 Job Created: `{job_id}`. Processing in background...")
+                    
+                    # 2. Polling Loop
+                    while True:
+                        job_res = requests.get(f"{API_BASE}/api/job/{job_id}", headers=HEADERS, timeout=10).json()
+                        current_status = job_res.get("status")
+                        
+                        if current_status == "Complete":
+                            st.session_state.segments = job_res.get("result", {}).get("segments")
+                            status_box.update(label="✅ Neural Analysis Complete!", state="complete", expanded=False)
+                            st.success("Analysis finalized. Script Editor Active.")
+                            st.rerun()
+                            break
+                        elif current_status == "Error":
+                            st.error(f"Backend Analysis Failed: {job_res.get('error')}")
+                            break
+                        else:
+                            # Update UI with background progress
+                            status_box.write(f"⚙️ {current_status}")
+                            time.sleep(3) # Poll every 3 seconds
                 else:
-                    st.error(f"Backend Analysis Failed: {response.text}")
+                    st.error(f"Handshake Failed: {response.text}")
             except Exception as e:
                 st.error(f"Connection Error: {e}")
 

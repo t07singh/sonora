@@ -79,7 +79,7 @@ class GeminiTranslator:
         except Exception as e:
             logger.error(f"Failed to initialize Gemini: {e}")
 
-    @retry_api_call(max_retries=3, base_delay=1)
+    @retry_api_call(max_retries=10, base_delay=1)
     def translate(self, prompt: str) -> str:
         """Translates text using Google Gemini with verified model fallback."""
         if not self.client:
