@@ -6,6 +6,9 @@ import json
 import asyncio
 import os
 import sys
+import logging
+
+logger = logging.getLogger("sonora.api")
 
 # Ensure project root is in path
 sys.path.append(os.getcwd())
