@@ -79,7 +79,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Uplo
 import uuid
 
 # --- Job Storage ---
-JOBS_FILE = "sonora/data/temp/jobs.json"
+SHARED_PATH = os.getenv("SHARED_PATH", "/tmp/sonora")
+JOBS_FILE = os.path.join(SHARED_PATH, "jobs.json")
 analysis_jobs = {}
 
 def save_jobs():
@@ -171,22 +172,25 @@ async def background_analysis(job_id: str, file_path: str, filename: str):
 @app.post("/api/analyze")
 async def analyze_media(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     job_id = str(uuid.uuid4())
-    temp_dir = "sonora/data/temp"
+    temp_dir = SHARED_PATH
     os.makedirs(temp_dir, exist_ok=True)
-    file_path = os.path.join(temp_dir, file.filename)
+    
+    # Safe filename relative to SHARED_PATH (prevent collisions)
+    safe_filename = f"{job_id}_{file.filename.replace('/', '_').replace('\\', '_')}"
+    file_path = os.path.join(temp_dir, safe_filename)
     
     with open(file_path, "wb") as buffer:
         buffer.write(await file.read())
         
     analysis_jobs[job_id] = {
         "status": "Starting...",
-        "filename": file.filename,
+        "filename": safe_filename,
         "result": None,
         "error": None
     }
     save_jobs()
     
-    background_tasks.add_task(background_analysis, job_id, file_path, file.filename)
+    background_tasks.add_task(background_analysis, job_id, file_path, safe_filename)
     return {"job_id": job_id, "status": "Queued"}
 
 @app.get("/api/job/{job_id}")
