@@ -93,6 +93,9 @@ if 'editor' not in st.session_state:
 if 'segments' not in st.session_state:
     st.session_state.segments = None
 
+if 'active_job_id' not in st.session_state:
+    st.session_state.active_job_id = None
+
 # Support Docker environment variables
 API_BASE = os.getenv("BACKEND_URL", "http://localhost:8000")
 ENDPOINTS = {
@@ -208,36 +211,47 @@ def render_dubbing_pipeline():
         target_lang = c1.selectbox("Target Language", ["English (en)", "Spanish (es)", "French (fr)"])
         dubbing_mode = c2.selectbox("Dubbing Mode", ["Fast (Streaming)", "High Quality (Batch)"])
     
+    # Helper for persistent polling
+    def poll_job(job_id, status_box):
+        while True:
+            try:
+                job_res = requests.get(f"{API_BASE}/api/job/{job_id}", headers=HEADERS, timeout=10).json()
+                current_status = job_res.get("status")
+                
+                if current_status == "Complete":
+                    st.session_state.segments = job_res.get("result", {}).get("segments")
+                    st.session_state.active_job_id = None # Clear once done
+                    status_box.update(label="✅ Neural Analysis Complete!", state="complete", expanded=False)
+                    st.success("Analysis finalized. Script Editor Active.")
+                    st.rerun()
+                    break
+                elif current_status == "Error":
+                    st.error(f"Backend Analysis Failed: {job_res.get('error')}")
+                    st.session_state.active_job_id = None
+                    break
+                else:
+                    status_box.write(f"⚙️ {current_status}")
+                    time.sleep(3)
+            except Exception as e:
+                status_box.write(f"⏳ Waiting for API... ({e})")
+                time.sleep(5)
+
+    # 1. Automatic Resume if a job is in progress
+    if st.session_state.active_job_id and not st.session_state.segments:
+        with st.status(f"🛰️ Resuming Neural Analysis (Job: {st.session_state.active_job_id})...", expanded=True) as status_box:
+            poll_job(st.session_state.active_job_id, status_box)
+
+    # 2. Manual Start
     if st.button("🚀 Launch Dubbing Sequence", type="primary"):
-        status_placeholder = st.empty()
         with st.status("🕵️ Swarm Intelligence: Analyzing Content...", expanded=True) as status_box:
             try:
                 files = {'file': open(st.session_state.current_file_path, 'rb')}
-                # 1. Trigger Async Job
                 response = requests.post(ENDPOINTS["analyze"], files=files, headers=HEADERS, timeout=60)
                 if response.status_code == 200:
-                    job_data = response.json()
-                    job_id = job_data.get("job_id")
-                    status_box.write(f"🧬 Job Created: `{job_id}`. Processing in background...")
-                    
-                    # 2. Polling Loop
-                    while True:
-                        job_res = requests.get(f"{API_BASE}/api/job/{job_id}", headers=HEADERS, timeout=10).json()
-                        current_status = job_res.get("status")
-                        
-                        if current_status == "Complete":
-                            st.session_state.segments = job_res.get("result", {}).get("segments")
-                            status_box.update(label="✅ Neural Analysis Complete!", state="complete", expanded=False)
-                            st.success("Analysis finalized. Script Editor Active.")
-                            st.rerun()
-                            break
-                        elif current_status == "Error":
-                            st.error(f"Backend Analysis Failed: {job_res.get('error')}")
-                            break
-                        else:
-                            # Update UI with background progress
-                            status_box.write(f"⚙️ {current_status}")
-                            time.sleep(3) # Poll every 3 seconds
+                    job_id = response.json().get("job_id")
+                    st.session_state.active_job_id = job_id
+                    status_box.write(f"🧬 Job Created: `{job_id}`. Starting persistence link...")
+                    poll_job(job_id, status_box)
                 else:
                     st.error(f"Handshake Failed: {response.text}")
             except Exception as e:

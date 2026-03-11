@@ -66,8 +66,9 @@ class SonoraOrchestrator:
     Main Orchestrator for the Sonora Swarm.
     Routes requests to local microservices or cloud fallbacks.
     """
-    def __init__(self, audio_path: str):
+    def __init__(self, audio_path: str, status_callback: Optional[Callable[[str], None]] = None):
         self.audio_path = audio_path
+        self.status_callback = status_callback
         self.transcriber = Transcriber()
         self.translator = HardenedTranslator()
         
@@ -77,6 +78,14 @@ class SonoraOrchestrator:
         
         # Initialize Separator for High-Res Swarm
         self.separator = AudioSeparator(model=SeparationModel.SWARM_DEMUCS)
+
+    def update_status(self, msg: str):
+        if self.status_callback:
+            if asyncio.iscoroutinefunction(self.status_callback):
+                asyncio.create_task(self.status_callback(msg))
+            else:
+                self.status_callback(msg)
+        logger.info(f"STATUS UPDATE: {msg}")
 
     async def run_transcription(self, path: Optional[str] = None) -> List[Dict]:
         """Calls the sonora-transcriber microservice."""
@@ -161,23 +170,23 @@ class SonoraOrchestrator:
     async def translate_segment(self, segment: Union[List[Dict], Dict], style: str = "Anime") -> str:
         """Translates a segment using the Hardened Translator (GPT-4o/Claude)."""
         if isinstance(segment, list):
-            # Case: List of words
             text = " ".join([w.get('word', w.get('text', '')) for w in segment])
         else:
-            # Case: Single Whisper segment
             text = segment.get('text', '')
             
         target_syllables = estimate_japanese_morae(text)
-        
-        # Phase 2 Gemini Integration: "Syllable-Aware" prompting
-        prompt = (
+        prompt = self._build_translate_prompt(text, target_syllables, style)
+        return self.translator.translate(prompt)
+
+    def _build_translate_prompt(self, text: str, target_syllables: int, style: str) -> str:
+        """Helper to create the complex surgical translation prompt."""
+        return (
             f"You are Gemini, the Core Intelligence translator for Sonora. "
             f"Translate the following text to English in {style} style. "
             f"CRITICAL REQUIREMENT: Your English translation MUST contain EXACTLY {target_syllables} syllables "
             f"to ensure 'Zero-Warp' dubbing sync. Respond ONLY with the translated text without quotes or explanations.\n"
             f"Text: {text}"
         )
-        return self.translator.translate(prompt)
 
     async def translate_segments_batch(self, segments_raw: List[List[Dict]], style: str = "Anime") -> List[str]:
         """Translates a list of segments in batches for high-speed analysis."""
@@ -186,16 +195,18 @@ class SonoraOrchestrator:
         
         for i in range(0, len(segments_raw), batch_size):
             batch_segments = segments_raw[i : i + batch_size]
-            batch_prompts = []
+            batch_num = (i // batch_size) + 1
+            total_batches = (len(segments_raw) + batch_size - 1) // batch_size
             
+            self.update_status(f"Neural Link: Batch Translating ({batch_num}/{total_batches})...")
+            
+            batch_prompts = []
             for seg in batch_segments:
-                text = " ".join([w.get('word', w.get('text', '')) for w in seg])
-                target_syllables = estimate_japanese_morae(text)
-                prompt = (
-                    f"Translate to English ({style} style). "
-                    f"Requirement: EXACTLY {target_syllables} syllables. "
-                    f"Text: {text}"
-                )
+                # Assuming seg is a list of word dictionaries from Whisper's word-level segments
+                original_text = " ".join([w.get('word', '') for w in seg])
+                # Use estimate_japanese_morae for source language syllable count
+                syllables = estimate_japanese_morae(original_text)
+                prompt = self._build_translate_prompt(original_text, syllables, style)
                 batch_prompts.append(prompt)
             
             logger.info(f"🧠 [BATCH] Translating segments {i+1} to {i+len(batch_segments)}...")

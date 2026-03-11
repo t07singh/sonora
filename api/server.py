@@ -79,23 +79,46 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Uplo
 import uuid
 
 # --- Job Storage ---
+JOBS_FILE = "sonora/data/temp/jobs.json"
 analysis_jobs = {}
+
+def save_jobs():
+    try:
+        os.makedirs(os.path.dirname(JOBS_FILE), exist_ok=True)
+        with open(JOBS_FILE, "w") as f:
+            json.dump(analysis_jobs, f)
+    except Exception as e:
+        logger.error(f"Failed to save jobs: {e}")
+
+def load_jobs():
+    global analysis_jobs
+    if os.path.exists(JOBS_FILE):
+        try:
+            with open(JOBS_FILE, "r") as f:
+                analysis_jobs = json.load(f)
+        except:
+            analysis_jobs = {}
+
+# Load on startup
+load_jobs()
 
 # --- Helper for Background Processing ---
 async def background_analysis(job_id: str, file_path: str, filename: str):
+    async def update_job_status(msg: str):
+        analysis_jobs[job_id]["status"] = msg
+        save_jobs()
+        await manager.broadcast({"type": "status", "msg": msg, "job_id": job_id})
+
     try:
-        analysis_jobs[job_id]["status"] = "Neural Separation: Isolating stems..."
-        await manager.broadcast({"type": "status", "msg": analysis_jobs[job_id]["status"], "job_id": job_id})
-        
-        orch = SonoraOrchestrator(file_path)
+        await update_job_status("Neural Separation: Isolating stems (Demucs v4)...")
+        orch = SonoraOrchestrator(file_path, status_callback=update_job_status)
         
         # 1. STEM SEPARATION
         stems = await orch.run_separation()
         vocals_path = stems["vocals"]
         
         # 2. WHISPER ASR
-        analysis_jobs[job_id]["status"] = "Whisper ASR: Running word-level extraction..."
-        await manager.broadcast({"type": "status", "msg": analysis_jobs[job_id]["status"], "job_id": job_id})
+        await update_job_status("Whisper ASR: Running word-level extraction...")
         raw_segments = await orch.run_transcription(vocals_path)
         
         raw_words = []
@@ -107,16 +130,14 @@ async def background_analysis(job_id: str, file_path: str, filename: str):
         
         segments_raw = group_words_by_pause(raw_words)
         
-        # 3. TRANSLATION
-        analysis_jobs[job_id]["status"] = f"Neural Link: Batch Translating {len(segments_raw)} segments..."
-        await manager.broadcast({"type": "status", "msg": analysis_jobs[job_id]["status"], "job_id": job_id})
+        # 3. TRANSLATION (Progress managed by orchestrator callback)
         translations = await orch.translate_segments_batch(segments_raw)
         
         formatted_segments = []
         for i, seg in enumerate(segments_raw):
             speaker_id = "HIRO" if i % 2 == 0 else "SAKURA"
             voice_type = "Heroic / Shonen" if i % 2 == 0 else "High-Pitch / Feminine"
-            original_text = " ".join([w['word'] for w in seg])
+            original_text = " ".join([w.get('word', '') for w in seg])
             translated_text = translations[i] if i < len(translations) else "[ERROR]"
             
             formatted_segments.append({
@@ -137,12 +158,14 @@ async def background_analysis(job_id: str, file_path: str, filename: str):
             
         analysis_jobs[job_id]["status"] = "Complete"
         analysis_jobs[job_id]["result"] = {"segments": formatted_segments}
+        save_jobs()
         await manager.broadcast({"type": "status", "msg": "Neural Link: Analysis Complete.", "success": True, "job_id": job_id})
         
     except Exception as e:
         error_msg = f"Neural Link Error: {str(e)}"
         analysis_jobs[job_id]["status"] = "Error"
         analysis_jobs[job_id]["error"] = error_msg
+        save_jobs()
         await manager.broadcast({"type": "status", "msg": error_msg, "error": True, "job_id": job_id})
 
 @app.post("/api/analyze")
@@ -161,14 +184,16 @@ async def analyze_media(background_tasks: BackgroundTasks, file: UploadFile = Fi
         "result": None,
         "error": None
     }
+    save_jobs()
     
     background_tasks.add_task(background_analysis, job_id, file_path, file.filename)
     return {"job_id": job_id, "status": "Queued"}
 
 @app.get("/api/job/{job_id}")
 async def get_job_status(job_id: str):
+    load_jobs() # Refresh from disk for cross-worker/restart consistency
     if job_id not in analysis_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found in vault")
     return analysis_jobs[job_id]
 
 @app.post("/api/refactor")
