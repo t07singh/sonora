@@ -16,12 +16,18 @@ class HardwareLock:
     Global guard for VRAM/CPU resources.
     Ensures heavy models (Whisper, Demucs, Qwen) run sequentially to prevent crashes.
     """
-    _lock = asyncio.Lock()
+    _lock = None
     _active_model: Optional[str] = None
 
     @classmethod
+    def _get_lock(cls):
+        if cls._lock is None:
+            cls._lock = asyncio.Lock()
+        return cls._lock
+
+    @classmethod
     async def acquire(cls, model_name: str):
-        await cls._lock.acquire()
+        await cls._get_lock().acquire()
         cls._active_model = model_name
         logger.info(f"🔒 HardwareLock ACQUIRED by {model_name}. Loading weights...")
 
@@ -29,7 +35,11 @@ class HardwareLock:
     def release(cls):
         model = cls._active_model
         cls._active_model = None
-        cls._lock.release()
+        if cls._lock is not None:
+            try:
+                cls._lock.release()
+            except RuntimeError:
+                pass
         logger.info(f"🔓 HardwareLock RELEASED by {model}. Unloading weights...")
 
 def retry_api_call(
