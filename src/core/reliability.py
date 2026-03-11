@@ -26,9 +26,15 @@ class HardwareLock:
     Ensures services (Transcriber, Synthesizer, LipSync) run sequentially 
     across separate Docker containers to prevent GPU OOM crashes.
     """
-    _local_lock = asyncio.Lock()
+    _local_lock = None
     _lock_key = "swarm:hardware_mutex"
     _lock_timeout = 120 # 2 minute safety timeout
+
+    @classmethod
+    def _get_local_lock(cls):
+        if cls._local_lock is None:
+            cls._local_lock = asyncio.Lock()
+        return cls._local_lock
 
     @classmethod
     async def acquire(cls, model_name: str, priority: int = 5):
@@ -50,7 +56,7 @@ class HardwareLock:
                 await asyncio.sleep(poll_interval)
             logger.info(f"🛰️ HardwareLock ACQUIRED by {model_name}.")
         else:
-            await cls._local_lock.acquire()
+            await cls._get_local_lock().acquire()
             logger.info(f"🔒 Local HardwareLock ACQUIRED by {model_name}.")
 
     @classmethod
@@ -60,7 +66,8 @@ class HardwareLock:
             logger.info(f"🔓 [REASONING] Distributed HardwareLock RELEASED.")
         else:
             try:
-                cls._local_lock.release()
+                if cls._local_lock is not None:
+                    cls._local_lock.release()
                 logger.info(f"🔓 [REASONING] Local HardwareLock RELEASED.")
             except RuntimeError:
                 pass
