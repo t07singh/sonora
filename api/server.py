@@ -14,11 +14,21 @@ logger = logging.getLogger("sonora.api")
 sys.path.append(os.getcwd())
 
 from sonora.core.project_manager import SonoraProject
-from sonora.core.orchestrator import SonoraOrchestrator, group_words_by_pause
+from sonora.core.orchestrator import SonoraOrchestrator, group_words_by_pause, count_syllables, estimate_japanese_morae
 from sonora.utils.voice_registry import save_character_voice
 from api.auth import SonoraAuthMiddleware
+# Note: get_segmenter removed, moved to transcriber microservice
 
 app = FastAPI(title="Sonora AI Studio API")
+
+# --- Request Models ---
+class SegmentRequest(BaseModel):
+    video_path: str
+    project_id: Optional[str] = "default"
+
+class TranslateRequest(BaseModel):
+    segments: List[Dict]
+    style: Optional[str] = "Anime"
 
 # CORS
 app.add_middleware(
@@ -71,6 +81,7 @@ class SynthesizeRequest(BaseModel):
     translations: List[str]
     voice_id: str
     video_path: str
+    stems: Optional[Dict] = None
 
 # --- Routes ---
 
@@ -81,8 +92,9 @@ async def health_check():
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Body, BackgroundTasks
 import uuid
 
+from src.core.path_manager import SHARED_ROOT
 # --- Job Storage ---
-SHARED_PATH = os.getenv("SHARED_PATH", "/tmp/sonora")
+SHARED_PATH = str(SHARED_ROOT)
 JOBS_FILE = os.path.join(SHARED_PATH, "jobs.json")
 analysis_jobs = {}
 
@@ -107,6 +119,88 @@ def load_jobs():
 load_jobs()
 
 # --- Helper for Background Processing ---
+async def background_segmentation(job_id: str, video_path: str):
+    import httpx
+    transcriber_url = os.getenv("TRANSCRIBER_URL", "http://sonora-transcriber:8001/transcribe")
+    # Base URL for the service (removing the /transcribe part)
+    base_url = transcriber_url.rsplit('/', 1)[0]
+    segment_url = f"{base_url}/segment"
+    
+    try:
+        await manager.broadcast({"type": "status", "msg": "Initiating Neural Segmentation (Offloading to Transcriber)...", "job_id": job_id})
+        
+        async with httpx.AsyncClient(timeout=600.0) as client:
+            response = await client.post(segment_url, json={"video_path": video_path})
+            
+            if response.status_code != 200:
+                raise Exception(f"Transcriber service returned error {response.status_code}: {response.text}")
+                
+            data = response.json()
+            segments = data.get("segments", [])
+        
+        analysis_jobs[job_id]["status"] = "Complete"
+        analysis_jobs[job_id]["result"] = {"segments": segments}
+        save_jobs()
+        
+        await manager.broadcast({
+            "type": "status", 
+            "msg": "Segmentation Complete. Character Dialogue Mapped.", 
+            "success": True, 
+            "job_id": job_id,
+            "segments_count": len(segments)
+        })
+    except Exception as e:
+        logger.error(f"Segmentation Proxy Job {job_id} failed: {e}")
+        analysis_jobs[job_id]["status"] = "Error"
+        analysis_jobs[job_id]["error"] = str(e)
+        save_jobs()
+        await manager.broadcast({"type": "status", "msg": f"Segmentation Failed: {str(e)}", "error": True, "job_id": job_id})
+
+@app.post("/api/pipeline/segment")
+async def pipeline_segment(background_tasks: BackgroundTasks, req: SegmentRequest):
+    job_id = str(uuid.uuid4())
+    
+    analysis_jobs[job_id] = {
+        "status": "Queued",
+        "video_path": req.video_path,
+        "project_id": req.project_id,
+        "result": None,
+        "error": None
+    }
+    save_jobs()
+    
+    background_tasks.add_task(background_segmentation, job_id, req.video_path)
+    return {"job_id": job_id, "status": "Segmentation Queued"}
+
+@app.post("/api/pipeline/translate")
+async def pipeline_translate(req: TranslateRequest):
+    """
+    Translates a list of segments using high-speed neural link.
+    """
+    try:
+        orch = SonoraOrchestrator("dummy.mp4")
+        segments_for_orch = []
+        for s in req.segments:
+            if "words" in s:
+                segments_for_orch.append(s["words"])
+            else:
+                segments_for_orch.append([{"word": s.get("original", ""), "start": s.get("start",0), "end": s.get("end",0)}])
+        
+        translations = await orch.translate_segments_batch(segments_for_orch, style=req.style)
+        
+        updated_segments = []
+        for i, s in enumerate(req.segments):
+            s["translation"] = translations[i] if i < len(translations) else "[ERROR]"
+            s["targetFlaps"] = estimate_japanese_morae(s.get("original", ""))
+            s["currentFlaps"] = count_syllables(s["translation"])
+            updated_segments.append(s)
+            
+        return {"segments": updated_segments}
+    except Exception as e:
+        logger.error(f"Translation pipeline failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- Original Analysis Logic ---
 async def background_analysis(job_id: str, file_path: str, filename: str):
     async def update_job_status(msg: str):
         analysis_jobs[job_id]["status"] = msg
@@ -114,58 +208,78 @@ async def background_analysis(job_id: str, file_path: str, filename: str):
         await manager.broadcast({"type": "status", "msg": msg, "job_id": job_id})
 
     try:
-        await update_job_status("Neural Separation: Isolating stems (Demucs v4)...")
-        orch = SonoraOrchestrator(file_path, status_callback=update_job_status)
+        # Initialize orchestrator with the uploaded file path
+        orch = SonoraOrchestrator(file_path)
         
         # 1. STEM SEPARATION
-        stems = await orch.run_separation()
-        vocals_path = stems["vocals"]
+        await update_job_status("Neural Separation: Isolating stems (Demucs v4 Surgery)...")
+        try:
+            stems = await orch.run_separation()
+            vocals_path = stems.get("vocals", file_path)
+            music_path = stems.get("music", file_path)
+            chat_path = stems.get("chat", file_path)
+            cues_path = stems.get("cues", file_path)
+            songs_path = stems.get("songs", file_path)
+        except Exception as sep_error:
+            logger.warning(f"Separation failed ({sep_error}), falling back to original audio for ASR.")
+            await update_job_status(f"Separation Failed: Falling back to original audio.")
+            vocals_path = music_path = chat_path = cues_path = songs_path = file_path
+
         
         # 2. WHISPER ASR
         await update_job_status("Whisper ASR: Running word-level extraction...")
-        raw_segments = await orch.run_transcription(vocals_path)
+        raw_words = await orch.run_transcription(chat_path or vocals_path)
+        logger.info(f"🔍 [DIAGNOSTIC] Job {job_id}: Received {len(raw_words)} raw words.")
         
-        raw_words = []
-        for s in raw_segments:
-            if s.get('words'):
-                raw_words.extend(s['words'])
-            else:
-                raw_words.append({"word": s['text'], "start": s['start'], "end": s['end']})
-        
+        # group_words_by_pause takes the flat word list and returns segments
         segments_raw = group_words_by_pause(raw_words)
         
-        # 3. TRANSLATION (Progress managed by orchestrator callback)
+        # 3. TRANSLATION
+        await update_job_status("Neural Link: Translating content...")
         translations = await orch.translate_segments_batch(segments_raw)
         
         formatted_segments = []
         for i, seg in enumerate(segments_raw):
-            speaker_id = "HIRO" if i % 2 == 0 else "SAKURA"
-            voice_type = "Heroic / Shonen" if i % 2 == 0 else "High-Pitch / Feminine"
             original_text = " ".join([w.get('word', '') for w in seg])
             translated_text = translations[i] if i < len(translations) else "[ERROR]"
             
+            # Skip noise/breath lines marked by the AI (Phase 2 Surgical Hygiene)
+            if translated_text.upper() == "[EXTRANEOUS]":
+                logger.info(f"✨ [HYGIENE] Purging noise segment {i}: '{original_text[:20]}...'")
+                continue
+            
+            target_syllables = estimate_japanese_morae(original_text)
+            
             formatted_segments.append({
                 "id": str(i),
-                "speaker_id": speaker_id,
-                "voice_type": voice_type,
                 "start": seg[0]['start'],
                 "end": seg[-1]['end'],
                 "original": original_text,
                 "translation": translated_text,
-                "status": "OK",
-                "targetFlaps": len(original_text), 
-                "currentFlaps": len(translated_text),
-                "emotion": "neutral",
-                "intensity": 0.5,
-                "artifacts": []
+                "targetFlaps": target_syllables, 
+                "currentFlaps": count_syllables(translated_text),
+                "speaker": seg[0].get('speaker', 'UNKNOWN'),
+                "words": seg
             })
             
         analysis_jobs[job_id]["status"] = "Complete"
-        analysis_jobs[job_id]["result"] = {"segments": formatted_segments}
+        analysis_jobs[job_id]["result"] = {
+            "segments": formatted_segments,
+            "stems": {
+                "vocals": vocals_path,
+                "music": music_path,
+                "chat": chat_path,
+                "cues": cues_path,
+                "songs": songs_path
+            }
+        }
         save_jobs()
         await manager.broadcast({"type": "status", "msg": "Neural Link: Analysis Complete.", "success": True, "job_id": job_id})
         
     except Exception as e:
+        import traceback
+        logger.error(f"FATAL OUTER EXCEPTION: {e}")
+        logger.error(traceback.format_exc())
         error_msg = f"Neural Link Error: {str(e)}"
         analysis_jobs[job_id]["status"] = "Error"
         analysis_jobs[job_id]["error"] = error_msg
@@ -179,7 +293,8 @@ async def analyze_media(background_tasks: BackgroundTasks, file: UploadFile = Fi
     os.makedirs(temp_dir, exist_ok=True)
     
     # Safe filename relative to SHARED_PATH (prevent collisions)
-    safe_filename = f"{job_id}_{file.filename.replace('/', '_').replace('\\', '_')}"
+    clean_filename = file.filename.replace('/', '_').replace('\\', '_')
+    safe_filename = f"{job_id}_{clean_filename}"
     file_path = os.path.join(temp_dir, safe_filename)
     
     with open(file_path, "wb") as buffer:
@@ -206,13 +321,16 @@ async def get_job_status(job_id: str):
 @app.post("/api/refactor")
 async def refactor_segment(req: RefactorRequest):
     """Surgical Rewrite: Now supports Gemini 3 Flash."""
+    logger.info(f"Refactor request for: '{req.text[:50]}...' Target syllables: {req.target_syllables}")
     try:
         orch = SonoraOrchestrator("dummy.mp4") 
-        # If gemini is requested, we could route to a specialized module
-        # but for simplicity we keep it in orchestrator.refactor_line
-        new_text = await orch.refactor_line(req.text, req.target_syllables, req.style)
-        return {"text": new_text, "engine": req.engine}
+        result = await orch.refactor_line(req.text, req.target_syllables, req.style)
+        new_text = result.get("text", "")
+        provider = result.get("provider", "unknown")
+        logger.info(f"Refactored result: '{new_text[:50]}...' (Engine: {provider})")
+        return {"text": new_text, "engine": provider}
     except Exception as e:
+        logger.error(f"Refactor failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/registry/save")
@@ -244,7 +362,7 @@ async def synthesize_dub(req: SynthesizeRequest):
         
         # 2. Master Assembly Pass
         await manager.broadcast({"type": "status", "msg": "Master Continuity: Muxing with world track..."})
-        master_path = await orch.assemble_final_dub(req.video_path, takes, req.segments)
+        master_path = await orch.assemble_final_dub(req.video_path, takes, req.segments, stems=req.stems)
         
         await manager.broadcast({"type": "status", "msg": "Dubbing Complete!", "success": True})
         return {"master_path": master_path}

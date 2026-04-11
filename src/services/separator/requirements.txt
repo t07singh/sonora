@@ -9,3 +9,5 @@ numpy<2.0.0
 pydantic
 speechbrain
 python-multipart
+demucs>=4.0.0
+gradio_client>=0.10.0

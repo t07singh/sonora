@@ -19,13 +19,17 @@ import librosa
 import soundfile as sf
 from typing import Dict, List, Optional, Tuple, Union
 from pathlib import Path
-import torch
-import torchaudio
-# Patch torchaudio for SpeechBrain compatibility
-if not hasattr(torchaudio, 'list_audio_backends'):
-    def list_audio_backends():
-        return ['soundfile', 'sox']
-    torchaudio.list_audio_backends = list_audio_backends
+try:
+    import torch
+    import torchaudio
+    HAS_TORCH = True
+    # Patch torchaudio for SpeechBrain compatibility
+    if not hasattr(torchaudio, 'list_audio_backends'):
+        def list_audio_backends():
+            return ['soundfile', 'sox']
+        torchaudio.list_audio_backends = list_audio_backends
+except ImportError:
+    HAS_TORCH = False
 from dataclasses import dataclass
 from enum import Enum
 
@@ -47,8 +51,11 @@ class SeparationModel(Enum):
 @dataclass
 class SeparationResult:
     """Result of audio separation."""
-    voice: np.ndarray
-    music: np.ndarray
+    voice: np.ndarray # Original vocal stem (mixed)
+    music: np.ndarray # Background instrumental
+    chat: Optional[np.ndarray] = None # Pure speech
+    cues: Optional[np.ndarray] = None # Laughter, breaths, cues
+    songs: Optional[np.ndarray] = None # Background singing/opera
     drums: Optional[np.ndarray] = None
     bass: Optional[np.ndarray] = None
     sample_rate: int = 44100
@@ -80,7 +87,7 @@ class AudioSeparator:
     
     def _get_device(self, device: str) -> str:
         if device == "auto":
-            return get_device()
+            return get_device() if HAS_TORCH else "cpu"
         return device
     
     def load_model(self) -> None:
@@ -187,6 +194,9 @@ class AudioSeparator:
                         return SeparationResult(
                             voice=voice,
                             music=music,
+                            chat=res.get("chat"),
+                            cues=res.get("cues"),
+                            songs=res.get("songs"),
                             sample_rate=sr,
                             duration=len(voice) / sr,
                             model_used="swarm_separator_v4"

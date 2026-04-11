@@ -106,37 +106,58 @@ def render_studio_page():
     if st.session_state.segments:
         st.header("🎬 Surgical Script Editor")
         
+        if 'auto_refactored' not in st.session_state:
+            st.session_state.auto_refactored = set()
+
         for idx, seg in enumerate(st.session_state.segments):
-            col_time, col_edit, col_sync = st.columns([1, 4, 1])
+            col_meta, col_edit, col_sync = st.columns([1.5, 4, 1])
             
             start_t = seg[0]['start']
             end_t = seg[-1]['end']
+            speaker = seg[0].get('speaker', 'UNKNOWN')
             japanese_text = " ".join([w['word'] for w in seg])
             target_flaps = estimate_japanese_morae(japanese_text)
             
-            with col_time:
+            with col_meta:
+                st.markdown(f"**👤 {speaker}**")
                 st.code(f"{start_t:.2f}s → {end_t:.2f}s")
                 st.caption(f"Target: {target_flaps} flaps")
 
             with col_edit:
-                st.session_state.translations[idx] = st.text_input(
+                new_val = st.text_input(
                     f"Line {idx+1}", 
                     value=st.session_state.translations[idx], 
                     key=f"input_{idx}"
                 )
+                if new_val != st.session_state.translations[idx]:
+                    st.session_state.translations[idx] = new_val
+                    # Clear auto-refactor flag if user manually edited
+                    if idx in st.session_state.auto_refactored:
+                        st.session_state.auto_refactored.remove(idx)
             
             with col_sync:
                 current_flaps = count_syllables(st.session_state.translations[idx])
                 diff = abs(current_flaps - target_flaps)
+                
+                # Autonomous Sync Logic
+                if diff > 1 and idx not in st.session_state.auto_refactored:
+                    st.toast(f"⚡ Auto-Refactoring Line {idx+1} for sync...", icon="🪄")
+                    orch = SonoraOrchestrator(st.session_state.video_path)
+                    st.session_state.translations[idx] = asyncio.run(orch.refactor_line(st.session_state.translations[idx], target_flaps, char_tone))
+                    st.session_state.auto_refactored.add(idx)
+                    st.rerun()
+
                 if diff <= 1:
                     st.markdown("<p class='sync-ok'>✅ SYNC OK</p>", unsafe_allow_html=True)
                 else:
                     st.markdown(f"<p class='sync-drift'>⚠️ DRIFT ({current_flaps})</p>", unsafe_allow_html=True)
-                    if st.button("🪄 Refactor", key=f"fix_{idx}"):
-                        orch = SonoraOrchestrator(st.session_state.video_path)
-                        # Wrap async call
-                        st.session_state.translations[idx] = asyncio.run(orch.refactor_line(st.session_state.translations[idx], target_flaps, char_tone))
-                        st.rerun()
+                
+                # Persistent Refactor Button
+                if st.button("🪄 Refactor", key=f"fix_{idx}"):
+                    orch = SonoraOrchestrator(st.session_state.video_path)
+                    st.session_state.translations[idx] = asyncio.run(orch.refactor_line(st.session_state.translations[idx], target_flaps, char_tone))
+                    st.session_state.auto_refactored.add(idx) # Mark as refactored to prevent auto-triggering again immediately
+                    st.rerun()
 
         # Final Render Section
         st.markdown('<div class="render-area">', unsafe_allow_html=True)

@@ -1,5 +1,9 @@
 # sonora/multichar/diarize.py
-from pyannote.audio import Pipeline
+try:
+    from pyannote.audio import Pipeline
+    HAS_PYANNOTE = True
+except ImportError:
+    HAS_PYANNOTE = False
 import os
 import tempfile
 import ffmpeg
@@ -20,7 +24,7 @@ def get_pipeline(token: str = None):
         try:
             hf_token = token or os.getenv("PYANNOTE_TOKEN") or os.getenv("HF_TOKEN")
             
-            if hf_token:
+            if HAS_PYANNOTE and hf_token:
                 logger.info("Initializing Pyannote Pipeline with Token...")
                 _pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", use_auth_token=hf_token)
             else:
@@ -36,21 +40,18 @@ class MockDiarizationPipeline:
     """Mock pipeline for testing when pyannote is not available."""
     
     def __call__(self, audio_path: str):
-        """Return mock diarization results with 'Anime' flavor."""
-        logger.info(f"Using mock diarization for {audio_path}")
+        """Return mock diarization results that cover any duration."""
+        logger.info(f"Using dynamic mock diarization for {audio_path}")
         
-        # Simulate a typical "Anime Scene" structure
-        # Speaker A: Protagonist (Shonen)
-        # Speaker B: Antagonist (Deep Voice)
-        # Speaker C: Sidekick (High Pitch)
-        
-        mock_segments = [
-            {"start": 0.5, "end": 2.5, "speaker": "SPEAKER_00"}, # A: "Wait!"
-            {"start": 3.0, "end": 6.2, "speaker": "SPEAKER_01"}, # B: "You cannot stop me."
-            {"start": 6.5, "end": 7.8, "speaker": "SPEAKER_00"}, # A: "I have to try!"
-            {"start": 8.0, "end": 9.5, "speaker": "SPEAKER_02"}, # C: "Senpai, be careful!"
-            {"start": 10.0, "end": 14.5, "speaker": "SPEAKER_00"} # A: "Final Attack!"
-        ]
+        # In a real scenario, we'd get the duration from the audio file
+        # Here we just generate enough segments to cover up to 1 hour
+        mock_segments = []
+        for i in range(120): # 120 segments of ~30s each
+            start = i * 30.0
+            end = (i + 1) * 30.0
+            speaker = f"SPEAKER_{i % 3:02d}" # Cycle through 3 speakers
+            mock_segments.append({"start": start, "end": end, "speaker": speaker})
+            
         return MockDiarizationResult(mock_segments)
 
 class MockDiarizationResult:

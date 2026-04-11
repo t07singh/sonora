@@ -4,7 +4,11 @@ import time
 import random
 import logging
 import functools
-import torch
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
 import asyncio
 from typing import Callable, Any, TypeVar, Optional, Union
 
@@ -67,7 +71,7 @@ def retry_api_call(
     return decorator if _func is None else decorator(_func)
 
 def get_device():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda" if (HAS_TORCH and torch.cuda.is_available()) else "cpu"
     if device == "cpu":
-        logger.info("Sonora Health Check: No GPU found. Hardening for CPU-Only mode.")
+        logger.info("Sonora Health Check: No GPU found or Torch missing. Hardening for CPU-Only mode.")
     return device

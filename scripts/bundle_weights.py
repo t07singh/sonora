@@ -66,14 +66,23 @@ def create_sample_voices():
     print("✅ Sample voices initialized.")
 
 def main():
+    cloud_offload = os.getenv("CLOUD_OFFLOAD", "false").lower() == "true"
+    
     os.makedirs("models", exist_ok=True)
-    download_qwen3()
-    download_whisper_large()
-    download_qwen7b()
-    download_wav2lip_hq()
-    download_demucs_v4()
-    create_sample_voices()
-    print("\n📦 ALL HEAVYWEIGHT MODEL WEIGHTS BUNDLED SUCCESSFULLY (~18GB).")
+    
+    if cloud_offload:
+        print("\n☁️ CLOUD OFFLOAD ACTIVE: Bypassing heavy local GPU weights (Qwen3, Whisper-v3, Demucs).")
+        # We only need the sample voices so the UI DB initializes
+        create_sample_voices()
+        print("\n📦 BUNDLE SCRIPT COMPLETE (Lightweight Cloud Mode).")
+    else:
+        download_qwen3()
+        download_whisper_large()
+        download_qwen7b()
+        download_wav2lip_hq()
+        download_demucs_v4()
+        create_sample_voices()
+        print("\n📦 ALL HEAVYWEIGHT MODEL WEIGHTS BUNDLED SUCCESSFULLY (~18GB).")
 
 if __name__ == "__main__":
     main()

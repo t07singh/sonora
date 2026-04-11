@@ -95,11 +95,12 @@ def main():
                 return
         
         uvicorn.run(
-            app,
+            "run_server:app" if not is_docker else "api.server:app",
             host="0.0.0.0",
             port=8000,
-            reload=False,  # Disable reload to avoid import issues
+            reload=False,
             log_level="info",
+            workers=2, # Multi-worker for responsiveness
             timeout_keep_alive=1200
         )
     except ImportError as e:

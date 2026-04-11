@@ -4,8 +4,10 @@ import logging
 
 logger = logging.getLogger("sonora.core.path_manager")
 
+from sonora.audio_editing.path_manager import get_data_dir
+
 # Shared mount point for all Sonora microservices
-SHARED_ROOT = Path("/tmp/sonora")
+SHARED_ROOT = get_data_dir()
 
 def ensure_shared_workspace():
     """Ensures the shared volume structure exists."""
