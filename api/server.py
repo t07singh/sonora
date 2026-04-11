@@ -17,7 +17,8 @@ from sonora.core.project_manager import SonoraProject
 from sonora.core.orchestrator import SonoraOrchestrator, group_words_by_pause, count_syllables, estimate_japanese_morae
 from sonora.utils.voice_registry import save_character_voice
 from api.auth import SonoraAuthMiddleware
-# Note: get_segmenter removed, moved to transcriber microservice
+# Segmenter service URL (new dedicated segmentation microservice)
+SEGMENTER_URL = os.getenv("SEGMENTER_URL", "http://sonora-segmenter:8004")
 
 app = FastAPI(title="Sonora AI Studio API")
 
@@ -25,6 +26,11 @@ app = FastAPI(title="Sonora AI Studio API")
 class SegmentRequest(BaseModel):
     video_path: str
     project_id: Optional[str] = "default"
+    language: Optional[str] = "ja"
+    mode: Optional[str] = "fast"  # "fast" or "precise"
+    cut_clips: Optional[bool] = True
+    isolate_vocals: Optional[bool] = True
+    num_speakers: Optional[int] = None
 
 class TranslateRequest(BaseModel):
     segments: List[Dict]
@@ -119,36 +125,100 @@ def load_jobs():
 load_jobs()
 
 # --- Helper for Background Processing ---
-async def background_segmentation(job_id: str, video_path: str):
+async def background_segmentation(job_id: str, video_path: str, language: str = "ja",
+                                       mode: str = "fast", cut_clips: bool = True,
+                                       isolate_vocals: bool = True, num_speakers: Optional[int] = None):
+    """
+    Proxy segmentation request to the dedicated Segmenter service (port 8004).
+    This replaces the old transcriber-based segmentation with the full pipeline:
+    Demucs → Silero VAD → Whisper → pyannote → Merge → Cut
+    """
     import httpx
-    transcriber_url = os.getenv("TRANSCRIBER_URL", "http://sonora-transcriber:8001/transcribe")
-    # Base URL for the service (removing the /transcribe part)
-    base_url = transcriber_url.rsplit('/', 1)[0]
-    segment_url = f"{base_url}/segment"
-    
+
     try:
-        await manager.broadcast({"type": "status", "msg": "Initiating Neural Segmentation (Offloading to Transcriber)...", "job_id": job_id})
-        
-        async with httpx.AsyncClient(timeout=600.0) as client:
-            response = await client.post(segment_url, json={"video_path": video_path})
-            
-            if response.status_code != 200:
-                raise Exception(f"Transcriber service returned error {response.status_code}: {response.text}")
-                
-            data = response.json()
-            segments = data.get("segments", [])
-        
-        analysis_jobs[job_id]["status"] = "Complete"
-        analysis_jobs[job_id]["result"] = {"segments": segments}
-        save_jobs()
-        
         await manager.broadcast({
-            "type": "status", 
-            "msg": "Segmentation Complete. Character Dialogue Mapped.", 
-            "success": True, 
-            "job_id": job_id,
-            "segments_count": len(segments)
+            "type": "status",
+            "msg": "Initiating Neural Segmentation (Sonora Segmenter Service)...",
+            "job_id": job_id
         })
+
+        # Call the dedicated segmenter service
+        segment_url = f"{SEGMENTER_URL}/segment"
+        payload = {
+            "video_path": video_path,
+            "language": language,
+            "mode": mode,
+            "cut_clips": cut_clips,
+            "isolate_vocals": isolate_vocals,
+            "num_speakers": num_speakers
+        }
+
+        async with httpx.AsyncClient(timeout=600.0) as client:
+            response = await client.post(segment_url, json=payload)
+
+            if response.status_code != 200:
+                raise Exception(f"Segmenter service returned error {response.status_code}: {response.text}")
+
+            data = response.json()
+            segmenter_job_id = data.get("job_id")
+
+        # Now poll the segmenter service for completion
+        poll_url = f"{SEGMENTER_URL}/job/{segmenter_job_id}"
+        max_polls = 120  # 10 minutes at 5s intervals
+        poll_count = 0
+
+        while poll_count < max_polls:
+            await asyncio.sleep(5)
+            poll_count += 1
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                poll_response = await client.get(poll_url)
+                if poll_response.status_code != 200:
+                    continue
+
+                poll_data = poll_response.json()
+                status = poll_data.get("status", "")
+                progress = poll_data.get("progress", 0)
+
+                # Broadcast progress
+                if status == "Processing":
+                    await manager.broadcast({
+                        "type": "status",
+                        "msg": f"Segmenting: {status} ({progress:.0%})",
+                        "job_id": job_id,
+                        "progress": progress
+                    })
+                elif status == "Complete":
+                    result = poll_data.get("result", {})
+                    segments = result.get("segments", [])
+
+                    analysis_jobs[job_id]["status"] = "Complete"
+                    analysis_jobs[job_id]["result"] = {
+                        "segments": segments,
+                        "num_speakers": result.get("num_speakers", 0),
+                        "duration": result.get("duration", 0),
+                        "language": result.get("language", language),
+                        "mode": result.get("mode", mode),
+                        "processing_time": result.get("processing_time", 0)
+                    }
+                    save_jobs()
+
+                    await manager.broadcast({
+                        "type": "status",
+                        "msg": f"Segmentation Complete: {len(segments)} segments, "
+                               f"{result.get('num_speakers', 0)} speakers.",
+                        "success": True,
+                        "job_id": job_id,
+                        "segments_count": len(segments)
+                    })
+                    return
+
+                elif status == "Error":
+                    error_msg = poll_data.get("error", "Unknown segmentation error")
+                    raise Exception(error_msg)
+
+        raise Exception("Segmentation timed out after 10 minutes")
+
     except Exception as e:
         logger.error(f"Segmentation Proxy Job {job_id} failed: {e}")
         analysis_jobs[job_id]["status"] = "Error"
@@ -158,19 +228,29 @@ async def background_segmentation(job_id: str, video_path: str):
 
 @app.post("/api/pipeline/segment")
 async def pipeline_segment(background_tasks: BackgroundTasks, req: SegmentRequest):
+    """
+    Trigger the full segmentation pipeline via the dedicated Segmenter service.
+    Pipeline: Demucs → Silero VAD → Whisper → pyannote → Merge → Cut clips
+    Returns a job_id immediately; poll /api/job/{job_id} for results.
+    """
     job_id = str(uuid.uuid4())
-    
+
     analysis_jobs[job_id] = {
         "status": "Queued",
         "video_path": req.video_path,
         "project_id": req.project_id,
+        "language": req.language,
+        "mode": req.mode,
         "result": None,
         "error": None
     }
     save_jobs()
-    
-    background_tasks.add_task(background_segmentation, job_id, req.video_path)
-    return {"job_id": job_id, "status": "Segmentation Queued"}
+
+    background_tasks.add_task(
+        background_segmentation, job_id, req.video_path,
+        req.language, req.mode, req.cut_clips, req.isolate_vocals, req.num_speakers
+    )
+    return {"job_id": job_id, "status": "Segmentation Queued", "mode": req.mode}
 
 @app.post("/api/pipeline/translate")
 async def pipeline_translate(req: TranslateRequest):
