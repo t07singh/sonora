@@ -49,6 +49,7 @@ services:
       - SEPARATOR_URL=http://sonora-separator:8000/process
       - TRANSCRIBER_URL=http://sonora-transcriber:8001/transcribe
       - SYNTHESIZER_URL=http://sonora-synthesizer:8002/synthesize
+      - SEGMENTER_URL=http://sonora-segmenter:8004
       - REDIS_URL=redis://redis-cache:6379/0
       - BACKEND_URL=http://sonora-api:8000
       - SHARED_PATH=/tmp/sonora
@@ -56,6 +57,7 @@ services:
       - CLOUD_OFFLOAD=true
     depends_on:
       - redis-cache
+      - sonora-segmenter
     networks:
       - sonora-network
 
@@ -137,6 +139,43 @@ services:
       - redis-cache
     networks:
       - sonora-network
+
+  # ─────────────────────────────────────────────
+  # SONORA SEGMENTER (Port 8004) — Full Video Segmentation Pipeline
+  # Demucs → Silero VAD → Whisper ASR → pyannote Diarization → Cut Clips
+  # ─────────────────────────────────────────────
+  sonora-segmenter:
+    container_name: sonora-segmenter
+    build:
+      context: .
+      dockerfile: src/services/segmenter/Dockerfile
+    ports:
+      - "8004:8004"
+    volumes:
+      - .:/app
+      - sonora-shared:/tmp/sonora
+    env_file:
+      - .env
+    environment:
+      - SEGMENTER_PORT=8004
+      - WHISPER_MODEL=large-v3
+      - SEGMENTER_MODE=fast
+      - HF_TOKEN=${HF_TOKEN}
+      - REDIS_URL=redis://redis-cache:6379/0
+      - SHARED_PATH=/tmp/sonora
+      - SONORA_DATA_DIR=/tmp/sonora
+      - SONORA_MODE=production
+    depends_on:
+      - redis-cache
+    networks:
+      - sonora-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   # ─────────────────────────────────────────────
   # REDIS CACHE (Internal)
