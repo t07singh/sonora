@@ -4,7 +4,8 @@ Sonora Segmenter Service — FastAPI microservice for video segmentation.
 Runs on port 8004 as part of the Sonora Docker swarm.
 Provides endpoints for segmenting video into per-sentence, per-speaker clips.
 
-Pipeline: Demucs → Silero VAD → Whisper ASR → pyannote Diarization → Merge → ffmpeg Cut
+Pipeline: Demucs → Silero VAD → Whisper ASR → pyannote Diarization →
+         Qwen3-ForcedAligner / wav2vec2 (precise mode) → Merge → ffmpeg Cut
 """
 
 import os
@@ -24,7 +25,8 @@ from pydantic import BaseModel, Field
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from src.services.segmenter.engine import (
-    VideoSegmenter, SegmentationResult, Segment, Word
+    VideoSegmenter, SegmentationResult, Segment, Word,
+    Qwen3ForcedAligner, JapaneseForcedAligner, AlignerFactory
 )
 from src.core.reliability import HardwareLock
 
@@ -42,6 +44,7 @@ PORT = int(os.getenv("SEGMENTER_PORT", "8004"))
 HF_TOKEN = os.getenv("HF_TOKEN")
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3")
 DEFAULT_MODE = os.getenv("SEGMENTER_MODE", "fast")  # "fast" or "precise"
+DEFAULT_ALIGNER = os.getenv("ALIGNER_TYPE", "qwen3")  # "qwen3" or "wav2vec2"
 SHARED_PATH = os.getenv("SHARED_PATH", "/tmp/sonora")
 SONORA_DATA_DIR = os.getenv("SONORA_DATA_DIR", str(Path.home() / "sonora" / "data"))
 
@@ -72,6 +75,7 @@ class SegmentRequest(BaseModel):
     video_path: str = Field(..., description="Path to video file in shared volume, or filename")
     language: str = Field("ja", description="Language code (ja, en, etc.)")
     mode: str = Field(DEFAULT_MODE, description="Segmentation mode: 'fast' or 'precise'")
+    aligner: str = Field(DEFAULT_ALIGNER, description="Forced aligner: 'qwen3' (SOTA) or 'wav2vec2' (legacy)")
     min_segment_duration: float = Field(0.5, description="Minimum segment duration in seconds")
     max_segment_duration: float = Field(15.0, description="Maximum segment duration in seconds")
     cut_clips: bool = Field(True, description="Whether to cut video into individual clips")
@@ -111,6 +115,7 @@ class SegmentationResponse(BaseModel):
     num_speakers: int
     device: str
     mode: str
+    aligner: str = "qwen3"
     processing_time: float
     job_id: Optional[str] = None
 
@@ -121,6 +126,7 @@ class HealthResponse(BaseModel):
     hf_token_present: bool
     pyannote_available: bool
     mode: str
+    aligner: str
 
 # ─────────────────────────────────────────────────────────────
 # Job Storage (in-memory with optional persistence)
@@ -210,7 +216,8 @@ async def background_segmentation(job_id: str, req: SegmentRequest):
             hf_token=HF_TOKEN,
             num_speakers=req.num_speakers,
             output_dir=SONORA_DATA_DIR,
-            status_callback=status_cb
+            status_callback=status_cb,
+            aligner_type=req.aligner
         )
 
         # Acquire hardware lock (GPU)
@@ -278,6 +285,7 @@ def _result_to_dict(result: SegmentationResult) -> dict:
         "num_speakers": result.num_speakers,
         "device": result.device,
         "mode": result.mode,
+        "aligner": result.aligner,
         "processing_time": result.processing_time
     }
 
@@ -305,7 +313,8 @@ async def health_check():
         whisper_model=WHISPER_MODEL,
         hf_token_present=HF_TOKEN is not None,
         pyannote_available=pyannote_available,
-        mode=DEFAULT_MODE
+        mode=DEFAULT_MODE,
+        aligner=DEFAULT_ALIGNER
     )
 
 
@@ -355,6 +364,7 @@ async def segment_video(req: SegmentRequest, background_tasks: BackgroundTasks):
         num_speakers=0,
         device="pending",
         mode=req.mode,
+        aligner=req.aligner,
         processing_time=0,
         job_id=job_id
     )
@@ -379,7 +389,8 @@ async def segment_video_sync(req: QuickSegmentRequest):
             whisper_model=WHISPER_MODEL,
             hf_token=HF_TOKEN,
             num_speakers=req.num_speakers,
-            output_dir=SONORA_DATA_DIR
+            output_dir=SONORA_DATA_DIR,
+            aligner_type=DEFAULT_ALIGNER
         )
 
         async with HardwareLock.locked_async("Segmenter", priority=2):
@@ -584,6 +595,7 @@ async def startup():
     logger.info(f"  Device: {'cuda' if torch.cuda.is_available() else 'cpu'}")
     logger.info(f"  Whisper Model: {WHISPER_MODEL}")
     logger.info(f"  Mode: {DEFAULT_MODE}")
+    logger.info(f"  Aligner: {DEFAULT_ALIGNER}")
     logger.info(f"  HF Token: {'present' if HF_TOKEN else 'MISSING'}")
     logger.info(f"  Shared Path: {SHARED_PATH}")
     logger.info(f"  Data Dir: {SONORA_DATA_DIR}")
