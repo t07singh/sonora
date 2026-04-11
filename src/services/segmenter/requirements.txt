@@ -27,8 +27,13 @@ unidic-lite>=1.0.8
 ffmpeg-python>=0.2.0
 soundfile>=0.12.0
 
-# Forced alignment (precise mode)
-transformers>=4.35.0
+# Forced alignment — Qwen3 (PRIMARY, SOTA)
+transformers>=4.40.0
+accelerate>=0.25.0
+sentencepiece>=0.1.99
+
+# Forced alignment — wav2vec2 (LEGACY FALLBACK)
+# Already covered by transformers + torch + torchaudio above
 
 # Vocal isolation (optional)
 demucs>=4.0.0

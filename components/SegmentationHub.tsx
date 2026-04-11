@@ -11,6 +11,9 @@ interface NeuralSegment {
   relative_clip_path: string;
 }
 
+type AlignerType = 'qwen3' | 'wav2vec2';
+type SegmentationMode = 'fast' | 'precise';
+
 const SegmentationHub: React.FC<{
   addLog: (msg: string, type?: any) => void;
   onProceed: (segments: DialogueSegment[]) => void;
@@ -20,6 +23,9 @@ const SegmentationHub: React.FC<{
   const [segments, setSegments] = useState<NeuralSegment[] | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const [mode, setMode] = useState<SegmentationMode>('fast');
+  const [aligner, setAligner] = useState<AlignerType>('qwen3');
+  const [showSettings, setShowSettings] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Poll for job status
@@ -42,6 +48,8 @@ const SegmentationHub: React.FC<{
               setIsProcessing(false);
               setJobId(null);
               clearInterval(interval);
+            } else if (data.status === 'Processing') {
+              setProgress(data.progress || 0);
             }
           }
         } catch (e) {
@@ -54,17 +62,19 @@ const SegmentationHub: React.FC<{
 
   const handleFileSelect = async (file: File) => {
     setIsProcessing(true);
-    addLog(`Pipeline: Target acquired: "${file.name}". Starting Neural Diarization...`, "system");
+    const alignerLabel = aligner === 'qwen3' ? 'Qwen3-ForcedAligner' : 'wav2vec2';
+    addLog(`Pipeline: Target acquired: "${file.name}". Starting Neural Segmentation (${mode}, ${alignerLabel})...`, "system");
     
     try {
-      // In a real implementation with Docker, we'd upload the file first
-      // But for this "proceed" logic, we'll assume the /api/pipeline/segment understands the path
-      // or we send the path if it's already in the shared volume.
-      // Here we simulate the trigger.
       const response = await fetch('http://localhost:8000/api/pipeline/segment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ video_path: `/tmp/sonora/${file.name}`, project_id: 'auto' })
+        body: JSON.stringify({ 
+          video_path: `/tmp/sonora/${file.name}`, 
+          project_id: 'auto',
+          mode: mode,
+          aligner: aligner,
+        })
       });
 
       if (response.ok) {
@@ -94,14 +104,13 @@ const SegmentationHub: React.FC<{
     if (!segments) return;
     addLog("Segmentation layout confirmed. Proceeding to Script Translation...", "success");
     
-    // Map internal NeuralSegment to DialogueSegment for the rest of the app
     const dialogueSegments: DialogueSegment[] = segments.map(s => ({
       id: s.id,
       speaker_id: s.speaker,
       start: s.start,
       end: s.end,
       original: s.text,
-      translation: "", // To be filled in next step
+      translation: "",
       morae_count: 0,
       syllable_count: 0,
       emotion: "neutral",
@@ -123,15 +132,124 @@ const SegmentationHub: React.FC<{
            </h2>
            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.3em] mt-1">Isolating characters and sentences</p>
         </div>
-        {segments && (
-          <button 
-            onClick={confirmAndProceed}
-            className="px-8 py-3 bg-primary text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-primary/20 hover:scale-105 transition-all active:scale-95"
+        <div className="flex items-center gap-3">
+          {/* Settings Toggle */}
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${
+              showSettings 
+                ? 'bg-primary text-white border-primary' 
+                : 'bg-transparent text-slate-500 border-slate-300 dark:border-slate-700 hover:border-primary'
+            }`}
           >
-            Confirm Layout & Proceed
+            Settings
           </button>
-        )}
+          {segments && (
+            <button 
+              onClick={confirmAndProceed}
+              className="px-8 py-3 bg-primary text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-primary/20 hover:scale-105 transition-all active:scale-95"
+            >
+              Confirm Layout & Proceed
+            </button>
+          )}
+        </div>
       </header>
+
+      {/* Settings Panel */}
+      {showSettings && !segments && (
+        <div className="p-6 bg-slate-100 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800">
+          <div className="max-w-2xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Mode Selection */}
+            <div>
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">
+                Segmentation Mode
+              </label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setMode('fast')}
+                  className={`flex-1 px-4 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest border-2 transition-all ${
+                    mode === 'fast'
+                      ? 'bg-primary/10 border-primary text-primary'
+                      : 'bg-transparent border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-400'
+                  }`}
+                >
+                  <div className="font-black">Fast</div>
+                  <div className="text-[8px] opacity-60 mt-0.5">~100-300ms precision</div>
+                </button>
+                <button
+                  onClick={() => setMode('precise')}
+                  className={`flex-1 px-4 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest border-2 transition-all ${
+                    mode === 'precise'
+                      ? 'bg-primary/10 border-primary text-primary'
+                      : 'bg-transparent border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-400'
+                  }`}
+                >
+                  <div className="font-black">Precise</div>
+                  <div className="text-[8px] opacity-60 mt-0.5">~10-30ms forced alignment</div>
+                </button>
+              </div>
+            </div>
+
+            {/* Aligner Selection (only shown in precise mode) */}
+            <div>
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">
+                Forced Aligner
+                {mode === 'fast' && <span className="ml-2 text-slate-400 normal-case tracking-normal">(precise mode only)</span>}
+              </label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setAligner('qwen3')}
+                  disabled={mode === 'fast'}
+                  className={`flex-1 px-4 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest border-2 transition-all ${
+                    aligner === 'qwen3' && mode === 'precise'
+                      ? 'bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-transparent border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-400'
+                  } ${mode === 'fast' ? 'opacity-40 cursor-not-allowed' : ''}`}
+                >
+                  <div className="font-black">Qwen3</div>
+                  <div className="text-[8px] opacity-60 mt-0.5">SOTA, no dictionary needed</div>
+                </button>
+                <button
+                  onClick={() => setAligner('wav2vec2')}
+                  disabled={mode === 'fast'}
+                  className={`flex-1 px-4 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest border-2 transition-all ${
+                    aligner === 'wav2vec2' && mode === 'precise'
+                      ? 'bg-amber-500/10 border-amber-500 text-amber-600 dark:text-amber-400'
+                      : 'bg-transparent border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-400'
+                  } ${mode === 'fast' ? 'opacity-40 cursor-not-allowed' : ''}`}
+                >
+                  <div className="font-black">wav2vec2</div>
+                  <div className="text-[8px] opacity-60 mt-0.5">Legacy fallback</div>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Pipeline Info */}
+          <div className="max-w-2xl mx-auto mt-4 p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700">
+            <div className="text-[9px] font-mono text-slate-400 flex items-center gap-2">
+              <span className="text-primary font-bold">PIPELINE</span>
+              <span>Demucs</span>
+              <span className="text-slate-300">&rarr;</span>
+              <span>Silero VAD</span>
+              <span className="text-slate-300">&rarr;</span>
+              <span>Whisper ASR</span>
+              <span className="text-slate-300">&rarr;</span>
+              <span>pyannote</span>
+              {mode === 'precise' && (
+                <>
+                  <span className="text-slate-300">&rarr;</span>
+                  <span className={aligner === 'qwen3' ? 'text-emerald-500 font-bold' : 'text-amber-500 font-bold'}>
+                    {aligner === 'qwen3' ? 'Qwen3-Aligner' : 'wav2vec2'}
+                  </span>
+                </>
+              )}
+              <span className="text-slate-300">&rarr;</span>
+              <span>ffmpeg Cut</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {!segments ? (
         <div className="flex-1 flex flex-col items-center justify-center p-12">
@@ -141,7 +259,12 @@ const SegmentationHub: React.FC<{
           >
             {isProcessing && (
                <div className="absolute inset-0 bg-primary/5 flex items-center justify-center">
-                  <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                    {progress > 0 && (
+                      <span className="text-[10px] font-bold text-primary">{Math.round(progress * 100)}%</span>
+                    )}
+                  </div>
                </div>
             )}
             <input type="file" ref={fileInputRef} className="hidden" accept="video/*" onChange={e => e.target.files && handleFileSelect(e.target.files[0])} />
@@ -151,6 +274,16 @@ const SegmentationHub: React.FC<{
           <div className="text-center mt-8">
             <h3 className="text-lg font-black dark:text-slate-100 uppercase tracking-widest">{isProcessing ? 'Analyzing Audio Waves...' : 'Drop Anime Episode Here'}</h3>
             <p className="text-xs text-slate-500 mt-2 max-w-sm font-medium">Character voices will be automatically detected and sliced into frame-accurate samples.</p>
+            <div className="flex items-center justify-center gap-4 mt-4">
+              <span className="text-[9px] font-mono text-slate-400 px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded">
+                Mode: {mode.toUpperCase()}
+              </span>
+              {mode === 'precise' && (
+                <span className="text-[9px] font-mono text-slate-400 px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded">
+                  Aligner: {aligner === 'qwen3' ? 'Qwen3-ForcedAligner' : 'wav2vec2'}
+                </span>
+              )}
+            </div>
           </div>
         </div>
       ) : (

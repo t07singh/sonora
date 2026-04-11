@@ -28,6 +28,7 @@ class SegmentRequest(BaseModel):
     project_id: Optional[str] = "default"
     language: Optional[str] = "ja"
     mode: Optional[str] = "fast"  # "fast" or "precise"
+    aligner: Optional[str] = "qwen3"  # "qwen3" (SOTA) or "wav2vec2" (legacy)
     cut_clips: Optional[bool] = True
     isolate_vocals: Optional[bool] = True
     num_speakers: Optional[int] = None
@@ -127,7 +128,8 @@ load_jobs()
 # --- Helper for Background Processing ---
 async def background_segmentation(job_id: str, video_path: str, language: str = "ja",
                                        mode: str = "fast", cut_clips: bool = True,
-                                       isolate_vocals: bool = True, num_speakers: Optional[int] = None):
+                                       isolate_vocals: bool = True, num_speakers: Optional[int] = None,
+                                       **kwargs):
     """
     Proxy segmentation request to the dedicated Segmenter service (port 8004).
     This replaces the old transcriber-based segmentation with the full pipeline:
@@ -148,6 +150,7 @@ async def background_segmentation(job_id: str, video_path: str, language: str = 
             "video_path": video_path,
             "language": language,
             "mode": mode,
+            "aligner": kwargs.get("aligner", "qwen3"),
             "cut_clips": cut_clips,
             "isolate_vocals": isolate_vocals,
             "num_speakers": num_speakers
@@ -248,9 +251,10 @@ async def pipeline_segment(background_tasks: BackgroundTasks, req: SegmentReques
 
     background_tasks.add_task(
         background_segmentation, job_id, req.video_path,
-        req.language, req.mode, req.cut_clips, req.isolate_vocals, req.num_speakers
+        req.language, req.mode, req.cut_clips, req.isolate_vocals, req.num_speakers,
+        **{"aligner": req.aligner}
     )
-    return {"job_id": job_id, "status": "Segmentation Queued", "mode": req.mode}
+    return {"job_id": job_id, "status": "Segmentation Queued", "mode": req.mode, "aligner": req.aligner}
 
 @app.post("/api/pipeline/translate")
 async def pipeline_translate(req: TranslateRequest):

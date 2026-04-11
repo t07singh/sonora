@@ -1,5 +1,7 @@
 # Sonora Segmenter Service — Dockerfile
-# Handles: VAD, Whisper ASR, pyannote Diarization, Forced Alignment, Video Cutting
+# Handles: VAD, Whisper ASR, pyannote Diarization,
+#          Qwen3-ForcedAligner (PRIMARY) / wav2vec2 (FALLBACK),
+#          Video Cutting
 
 FROM python:3.11-slim
 
@@ -11,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     mecab-ipadic-utf8 \
     git \
     build-essential \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Mecab dictionary path
@@ -41,6 +44,8 @@ ENV SEGMENTER_PORT=8004
 ENV SHARED_PATH=/tmp/sonora
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
+# Default aligner: "qwen3" (SOTA) or "wav2vec2" (legacy)
+ENV ALIGNER_TYPE=qwen3
 
 EXPOSE 8004
 

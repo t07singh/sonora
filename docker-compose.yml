@@ -142,7 +142,8 @@ services:
 
   # ─────────────────────────────────────────────
   # SONORA SEGMENTER (Port 8004) — Full Video Segmentation Pipeline
-  # Demucs → Silero VAD → Whisper ASR → pyannote Diarization → Cut Clips
+  # Demucs → Silero VAD → Whisper ASR → pyannote Diarization →
+  # Qwen3-ForcedAligner / wav2vec2 (precise mode) → Cut Clips
   # ─────────────────────────────────────────────
   sonora-segmenter:
     container_name: sonora-segmenter
@@ -160,6 +161,7 @@ services:
       - SEGMENTER_PORT=8004
       - WHISPER_MODEL=large-v3
       - SEGMENTER_MODE=fast
+      - ALIGNER_TYPE=qwen3
       - HF_TOKEN=${HF_TOKEN}
       - REDIS_URL=redis://redis-cache:6379/0
       - SHARED_PATH=/tmp/sonora
