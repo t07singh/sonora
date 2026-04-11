@@ -1,7 +1,11 @@
 import os
 import time
 import numpy as np
-import torch
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
 import soundfile as sf
 from typing import Dict, Any, Optional
 from src.core.reliability import retry_api_call
@@ -15,7 +19,7 @@ class VibeVoiceTTS:
     Features: Emotion Control, Advanced Lip-Sync Cues, and Quality Assessment.
     """
     def __init__(self, model_path: str = "/models/vibevoice"):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = "cuda" if (HAS_TORCH and torch.cuda.is_available()) else "cpu"
         self.model_path = model_path
         self.initialized = False
         self._load_model()

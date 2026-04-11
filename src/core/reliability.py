@@ -4,7 +4,11 @@ import time
 import random
 import logging
 import functools
-import torch
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
 import asyncio
 import redis
 from typing import Callable, Any, TypeVar, Optional, Union
@@ -145,10 +149,21 @@ def retry_api_call(
     return decorator(_func)
 
 def get_device():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda" if (HAS_TORCH and torch.cuda.is_available()) else "cpu"
     if device == "cpu":
-        logger.info("Sonora Health Check: No GPU found. Hardening for CPU-Only mode.")
+        logger.info("Sonora Health Check: No GPU found or Torch missing. Hardening for Distributed CPU mode.")
     return device
+
+def get_available_memory():
+    """Returns available system memory in GB."""
+    try:
+        import psutil
+        return psutil.virtual_memory().available / (1024 ** 3)
+    except ImportError:
+        # Fallback if psutil not installed (unlikely in this environment but safe)
+        return 8.0 # Assume 8GB if we can't check
+    except Exception:
+        return 8.0
 
 def log_path_consistency(path: str, node: str):
     """Utility to verify absolute pathing across the shared volume."""

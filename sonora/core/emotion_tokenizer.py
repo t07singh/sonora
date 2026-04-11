@@ -5,42 +5,65 @@ Builds: Acoustic Feature Extraction + Wav2Vec2 Emotion Classification
 """
 import librosa
 import numpy as np
-import torch
-import warnings
-from transformers import Wav2Vec2FeatureExtractor, Wav2Vec2ForSequenceClassification
+try:
+    import torch
+    from transformers import Wav2Vec2FeatureExtractor, Wav2Vec2ForSequenceClassification
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
 
 # Suppress some common warnings from librosa/transformers for cleaner output
 warnings.filterwarnings("ignore", category=UserWarning)
 
 class EmotionTokenizer:
     def __init__(self):
+        if not HAS_TORCH:
+            logger.warning("EmotionTokenizer: Torch/Transformers missing. Analysis will be mocked.")
+            self.is_ready = False
+            return
+            
         # Using a professional-grade SER model (Speech Emotion Recognition)
         self.model_name = "ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition"
-        print(f"Loading Emotion Model: {self.model_name}...")
+        logger.info(f"Loading Emotion Model: {self.model_name}...")
         self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(self.model_name)
         self.model = Wav2Vec2ForSequenceClassification.from_pretrained(self.model_name)
         self.emotions = ["neutral", "calm", "happy", "sad", "angry", "fearful", "disgust", "surprised"]
         
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
-        print(f"Model loaded on {self.device}")
+        self.is_ready = True
+        logger.info(f"Emotion Model loaded on {self.device}")
 
     def analyze_segment(self, audio_path):
         """Extracts both raw prosody and high-level emotion tokens."""
         # Standardize to 16kHz as expected by Wav2Vec2
-        y, sr = librosa.load(audio_path, sr=16000)
+        try:
+            y, sr = librosa.load(audio_path, sr=16000)
+        except Exception as e:
+            logger.error(f"Failed to load audio for emotion analysis: {e}")
+            return {"token": "neutral", "confidence": 0.0, "avg_pitch": 0.0, "intensity": 0.0}
         
-        # 1. Acoustic Prosody (F0 and Energy)
-        # Using pyin for robust pitch tracking
-        f0, voiced_flag, voiced_probs = librosa.pyin(
-            y, 
-            fmin=librosa.note_to_hz('C2'), 
-            fmax=librosa.note_to_hz('C7'),
-            sr=sr
-        )
-        energy = librosa.feature.rms(y=y)[0]
+        # 1. Acoustic Prosody (Always available via librosa)
+        try:
+            f0, voiced_flag, voiced_probs = librosa.pyin(
+                y, 
+                fmin=librosa.note_to_hz('C2'), 
+                fmax=librosa.note_to_hz('C7'),
+                sr=sr
+            )
+            energy = librosa.feature.rms(y=y)[0]
+        except:
+            f0, energy = [0], [0]
         
-        # 2. AI Emotion Classification
+        # 2. AI Emotion Classification (Requires Torch)
+        if not HAS_TORCH or not getattr(self, 'is_ready', False):
+            return {
+                "token": "neutral",
+                "confidence": 0.5,
+                "avg_pitch": float(np.nanmean(f0)) if not np.all(np.isnan(f0)) else 0.0,
+                "intensity": float(np.mean(energy))
+            }
+
         inputs = self.feature_extractor(y, sampling_rate=16000, return_tensors="pt", padding=True)
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
         

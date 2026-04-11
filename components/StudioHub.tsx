@@ -145,6 +145,39 @@ const StudioHub: React.FC<{
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto p-8 space-y-4 scrollbar-hide">
+          {segments.length > 0 && segments.every(s => !s.translation) && (
+            <div className="mb-8 p-6 bg-primary/5 border border-primary/20 rounded-3xl flex justify-between items-center">
+               <div>
+                  <h3 className="text-sm font-black dark:text-white uppercase tracking-widest">Segments Verified</h3>
+                  <p className="text-[10px] text-slate-500 font-bold uppercase mt-1">Ready for neural script translation</p>
+               </div>
+               <button 
+                onClick={async () => {
+                   setIsProcessing(true);
+                   addLog("Neural Link: Starting batch script translation...", "system");
+                   try {
+                     const res = await fetch('http://localhost:8000/api/pipeline/translate', {
+                       method: 'POST',
+                       headers: { 'Content-Type': 'application/json' },
+                       body: JSON.stringify({ segments })
+                     });
+                     if (res.ok) {
+                        const data = await res.json();
+                        setSegments(data.segments);
+                        addLog(`Translation Successful: ${data.segments.length} lines adapted for anime context.`, "success");
+                     }
+                   } catch (e) {
+                      addLog("Translation failed: Terminal link unstable.", "warn");
+                   } finally {
+                      setIsProcessing(false);
+                   }
+                }}
+                className="px-6 py-3 bg-primary text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg animate-pulse"
+               >
+                 Neural Translate Script
+               </button>
+            </div>
+          )}
           {segments.map((seg) => (
             <div key={seg.id} className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 flex items-center gap-10 group hover:shadow-xl hover:scale-[1.01] transition-all duration-300">
               <div className="w-28 shrink-0 text-center">

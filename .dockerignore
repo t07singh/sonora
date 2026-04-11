@@ -14,7 +14,9 @@ venv/
 .vscode
 .idea
 .DS_Store
-data/
+sonora/data/
+sonora/temp/
+sonora/models/
 shared_data/
 tmp/
 logs/
@@ -28,5 +30,10 @@ models/
 *.mp3
 *.zip
 *.tar.gz
+node_modules/
+.git/
+.github/
+.venv/
+.env*
 # Removed invalid absolute paths causing build syntax errors
 

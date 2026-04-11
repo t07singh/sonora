@@ -27,20 +27,29 @@ def retry_api_call(max_retries=3, base_delay=1):
                     
                     # Detect Quota/Rate Limit
                     is_rate_limit = "429" in err_str or "quota" in err_str or "limit" in err_str
+                    # Detect Auth Failure (Fail Fast)
+                    is_auth_failure = "401" in err_str or "unauthorized" in err_str or "invalid_api_key" in err_str or "api key not valid" in err_str
                     
+                    if is_auth_failure:
+                        logger.error(f"🛑 [AUTH FAILURE] {func.__name__} failed with Invalid API Key. Cannot continue.")
+                        raise e
+                    
+                    if "limit: 0" in err_str:
+                        logger.error(f"⚠️ [QUOTA EXHAUSTED] {func.__name__} hit zero-limit quota. Failing fast to avoid hangs.")
+                        raise e
+
                     if retries > max_retries:
                         logger.error(f"[FAILURE] All {max_retries} retries exhausted for {func.__name__}. Error: {e}")
                         raise e
                     
                     if is_rate_limit:
-                        # Gemini Free Tier resets after 60s. We wait 65s for safety.
-                        delay = 65
-                        logger.warning(f"🚦 [RATE LIMIT] {func.__name__} hit Google Quota. Entering 65s Cool Down...")
+                        # Fast Fail for Rate Limits: Let the HardenedTranslator handle the fallback instantly
+                        logger.warning(f"🚦 [RATE LIMIT] {func.__name__} hit provider quota. Raising for instant fallback...")
+                        raise e
                     else:
-                        # Exponential Backoff for general errors
+                        # Exponential Backoff for general network/transient errors only
                         delay = base_delay * (2 ** (retries - 1))
                         logger.warning(f"[RETRY] Attempt {retries} for {func.__name__} failed. Retrying in {delay}s....")
-                    
-                    time.sleep(delay)
+                        time.sleep(delay)
         return wrapper
     return decorator

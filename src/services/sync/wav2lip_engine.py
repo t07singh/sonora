@@ -1,7 +1,15 @@
 import os
-import torch
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
 import numpy as np
-import cv2
+try:
+    import cv2
+    HAS_CV2 = True
+except ImportError:
+    HAS_CV2 = False
 import logging
 import subprocess
 from pathlib import Path
@@ -17,7 +25,7 @@ class Wav2LipEngine:
     def __init__(self, model_path: str = "models/wav2lip/wav2lip_gan.pth"):
         self.model_path = model_path
         self.face_model_path = "models/wav2lip/s3fd.pth"
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = "cuda" if (HAS_TORCH and torch.cuda.is_available()) else "cpu"
         self.is_ready = os.path.exists(model_path) and os.path.exists(self.face_model_path)
         
         if self.is_ready:

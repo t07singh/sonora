@@ -10,6 +10,7 @@ import CoreManifest from './components/CoreManifest';
 import StudioWalkthrough from './components/StudioWalkthrough';
 import SurgicalEditor from './components/SurgicalEditor';
 import CloudProvisioning from './components/CloudProvisioning';
+import SegmentationHub from './components/SegmentationHub';
 
 const App: React.FC = () => {
   const [activeMode, setActiveMode] = useState<AppMode>(AppMode.HUB);
@@ -123,6 +124,18 @@ const App: React.FC = () => {
 
         <div className="flex-1 overflow-hidden relative flex flex-col">
           <div className="flex-1 overflow-hidden bg-white dark:bg-slate-950 transition-colors">
+            {activeMode === AppMode.SEGMENTATION && (
+              <SegmentationHub 
+                addLog={addLog}
+                isProcessing={isProcessing}
+                setIsProcessing={setIsProcessing}
+                onProceed={(segs) => {
+                  setSegments(segs);
+                  setActiveMode(AppMode.HUB);
+                  addLog("Transitioning to Studio Hub for Neural Translation.", "system");
+                }}
+              />
+            )}
             {activeMode === AppMode.HUB && (
               <StudioHub 
                 addLog={addLog} 
