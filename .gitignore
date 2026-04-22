@@ -29,3 +29,16 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Large data and cache files
+__pycache__/
+*.pyc
+sonora/data/*.mp3
+sonora/data/*.wav
+sonora/data/segments/
+sonora/data/temp/
+sonora_voice_metadata_backup/
+sonora/
+!sonora/**
+# Note: Excluding the nested sonora folder found at C:\Users\HP\Downloads\sonora-studio (2)\sonora
+/sonora/
