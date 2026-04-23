@@ -100,8 +100,12 @@ if 'active_job_id' not in st.session_state:
 if 'auto_refactored' not in st.session_state:
     st.session_state.auto_refactored = set()
 
+if 'segmentation_job_id' not in st.session_state:
+    st.session_state.segmentation_job_id = None
+
 if 'stems' not in st.session_state:
     st.session_state.stems = {}
+if 'auto_refactored' not in st.session_state:
     st.session_state.auto_refactored = set()
 
 # Support Docker environment variables
@@ -152,7 +156,7 @@ def main():
         
         st.markdown("---")
         st.subheader("📁 Global Input")
-        uploaded_file = st.file_uploader("Import Source Audio", type=["wav", "mp3", "m4a"])
+        uploaded_file = st.file_uploader("Import Source Audio")
         
         if uploaded_file:
             if st.session_state.current_file_path is None or uploaded_file.name not in st.session_state.current_file_path:
@@ -191,7 +195,46 @@ def render_segmentation_hub():
         st.warning("⚠️ Please upload a source video/audio in the sidebar first.")
         return
 
-    st.video(st.session_state.current_file_path) if st.session_state.current_file_path.endswith('.mp4') else st.audio(st.session_state.current_file_path)
+    if st.session_state.current_file_path.endswith('.mp4'):
+        st.video(st.session_state.current_file_path)
+    else:
+        st.audio(st.session_state.current_file_path)
+
+    # Helper for persistent polling
+    def poll_segmentation_job(job_id, status_box):
+        while True:
+            try:
+                r = requests.get(f"{API_BASE}/api/job/{job_id}", headers=HEADERS, timeout=10)
+                if r.status_code == 200:
+                    job_data = r.json()
+                    current_status = job_data.get("status")
+                    
+                    if current_status == "Complete":
+                        st.session_state.segments = job_data.get("result", {}).get("segments", [])
+                        st.session_state.segmentation_job_id = None
+                        status_box.update(label=f"✅ Successfully extracted {len(st.session_state.segments)} dialogue segments!", state="complete")
+                        st.success("Dissection successful. You can now rename characters below.")
+                        st.rerun()
+                        break
+                    elif current_status == "Error":
+                        st.session_state.segmentation_job_id = None
+                        status_box.update(label="❌ Neural Handshake Failed", state="error")
+                        st.error(f"Error: {job_data.get('error')}")
+                        break
+                    else:
+                        status_box.write(f"⚙️ {current_status}...")
+                        time.sleep(2)
+                else:
+                    status_box.write("⏳ Waiting for API connection...")
+                    time.sleep(2)
+            except Exception as e:
+                status_box.write(f"⏳ Connection retry... ({e})")
+                time.sleep(3)
+
+    # 1. Automatic Resume if a job is in progress
+    if st.session_state.segmentation_job_id and not st.session_state.segments:
+        with st.status(f"🛰️ Resuming Dissection (Job: {st.session_state.segmentation_job_id})...", expanded=True) as status:
+            poll_segmentation_job(st.session_state.segmentation_job_id, status)
 
     c1, c2 = st.columns([3, 1])
     with c1:
@@ -202,14 +245,14 @@ def render_segmentation_hub():
                     # We pass the filename; the backend expects the file to be available in shared volume
                     payload = {"video_path": os.path.basename(st.session_state.current_file_path)}
                     
-                    # Call the new Proxy endpoint (timeout 10min for heavy AI)
-                    r = requests.post(ENDPOINTS["segment"], json=payload, headers=HEADERS, timeout=600)
+                    # Call the Proxy endpoint
+                    r = requests.post(ENDPOINTS["segment"], json=payload, headers=HEADERS, timeout=60)
                     
                     if r.status_code == 200:
-                        data = r.json()
-                        st.session_state.segments = data.get("segments", [])
-                        status.update(label=f"✅ Successfully extracted {len(st.session_state.segments)} dialogue segments!", state="complete")
-                        st.success("Dissection successful. You can now rename characters below.")
+                        job_id = r.json().get("job_id")
+                        st.session_state.segmentation_job_id = job_id
+                        status.write(f"🧬 Job Created: `{job_id}`. Starting persistence link...")
+                        poll_segmentation_job(job_id, status)
                     else:
                         status.update(label="❌ Neural Handshake Failed", state="error")
                         st.error(f"Error: {r.text}")
@@ -249,10 +292,81 @@ def render_segmentation_hub():
                     st.info(seg.get('text', '[No Dialogue Detected]'))
 
         if st.button("📥 Push to AI Dubbing Studio", use_container_width=True):
-            # This persists the segments into session state where render_dubbing_pipeline expects them
-            st.success("✅ Segments pushed to Studio. Switch to 'AI Dubbing' tab to continue.")
-            time.sleep(1)
-            # We don't need to do anything else, st.session_state.segments is already updated
+            with st.status("🌐 Swarm: Translating script into English...", expanded=True) as status:
+                from sonora.core.orchestrator import estimate_japanese_morae
+                from sonora.audio_editing.path_manager import get_secure_path
+                
+                status.write("🧬 Connecting to Neural Translation link...")
+                # Prepare segments for batch translation
+                # Ensure each segment has 'original' field (which is 'text' from WhisperX)
+                for seg in st.session_state.segments:
+                    seg["original"] = seg.get("text", "")
+                
+                try:
+                    # Optimized Batching: Process 10 segments at a time for better RPM efficiency
+                    chunk_size = 10
+                    all_segments = st.session_state.segments
+                    translated_segments = []
+                    
+                    num_chunks = (len(all_segments) + chunk_size - 1) // chunk_size
+                    any_errors = False
+                    
+                    for i in range(0, len(all_segments), chunk_size):
+                        chunk = all_segments[i:i + chunk_size]
+                        chunk_num = (i // chunk_size) + 1
+                        status.write(f"🛰️ Neural Link: Translating Batch {chunk_num}/{num_chunks}...")
+                        
+                        payload = {
+                            "segments": chunk,
+                            "style": "Anime"
+                        }
+                        
+                        try:
+                            # Primary API call with 300s timeout
+                            r = requests.post(f"{API_BASE}/api/pipeline/translate", json=payload, headers=HEADERS, timeout=300)
+                            
+                            if r.status_code == 200:
+                                chunk_results = r.json().get("segments", [])
+                                translated_segments.extend(chunk_results)
+                            else:
+                                status.update(label=f"⚠️ Partial Failure: Batch {chunk_num} stalled", state="error")
+                                st.error(f"Batch {chunk_num} Error ({r.status_code}): {r.text}")
+                                any_errors = True
+                                # Even on failure, we keep what we have so far
+                                translated_segments.extend(chunk) 
+                        except requests.exceptions.ReadTimeout:
+                            status.update(label=f"⌛ Neural Link Timeout: Batch {chunk_num}", state="error")
+                            st.warning(f"Batch {chunk_num} took over 300s. AI services might be busy. Keeping partial results.")
+                            any_errors = True
+                            translated_segments.extend(chunk)
+                        except Exception as e:
+                            st.error(f"Batch {chunk_num} Fault: {e}")
+                            any_errors = True
+                            translated_segments.extend(chunk)
+
+                    # Update session state with whatever we managed to translate
+                    st.session_state.segments = translated_segments
+                    
+                    if not any_errors:
+                        status.update(label="✅ Neural Translation Complete!", state="complete")
+                        st.session_state.nav_index = 3 # Switch to AI Dubbing
+                        st.session_state.nav_radio = "🎭 AI Dubbing"
+                        do_rerun = True
+                    else:
+                        status.update(label="🟠 Partial Translation Complete (with errors)", state="complete")
+                        st.info("Some segments failed to translate. You can repair them manually in the AI Dubbing tab.")
+                        time.sleep(2)
+                        st.session_state.nav_index = 3 # Switch anyway so they can see results
+                        st.session_state.nav_radio = "🎭 AI Dubbing"
+                        do_rerun = True
+
+                except Exception as e:
+                    if "RerunException" not in type(e).__name__:
+                        st.error(f"Neural Link Fatal Fault: {e}")
+                    raise e
+            
+            if "do_rerun" in locals() and do_rerun:
+                st.rerun()
 
 
 def render_dashboard():
@@ -349,7 +463,7 @@ def render_dubbing_pipeline():
         
         # --- REPAIR ALL ERRORS FEATURE ---
         error_indices = [idx for idx, s in enumerate(st.session_state.segments) 
-                         if s['translation'].startswith('[') and s['translation'].endswith(']')]
+                         if str(s.get('translation', '')).startswith('[') and str(s.get('translation', '')).endswith(']')]
         
         if error_indices:
             if c2.button(f"⚠️ Repair All ({len(error_indices)})", type="primary", use_container_width=True):
@@ -390,8 +504,7 @@ def render_dubbing_pipeline():
                 st.caption(f"Target: {seg.get('targetFlaps', 0)} flaps")
             
             with c2:
-                # Use a unique key for each segment
-                current_val = seg['translation']
+                current_val = seg.get('translation', '')
                 new_text = st.text_input(f"Segment {i+1}", value=current_val, key=f"seg_input_{i}_{st.session_state.active_job_id}")
                 
                 if new_text != current_val:
@@ -402,15 +515,29 @@ def render_dubbing_pipeline():
                     st.rerun() # Immediate update for sync status
             
             with c3:
-                # Actual syllable counting
+                # Proper Syllable counting with CJK awareness
+                def is_japanese(text):
+                    return any(ord(c) > 127 for c in text)
+                
                 is_sentinel = new_text.startswith('[') and new_text.endswith(']')
-                current_flaps = count_syllables(new_text) if not is_sentinel else 999
+                
+                if not new_text or not new_text.strip():
+                    current_flaps = 0
+                elif is_japanese(new_text):
+                    # For Japanese text, use mora counting
+                    current_flaps = estimate_japanese_morae(new_text) if not is_sentinel else 999
+                else:
+                    # For English text, use syllable counting
+                    current_flaps = count_syllables(new_text) if not is_sentinel else 999
+                
                 target_flaps = seg.get('targetFlaps', 10)
                 
                 # State Badge
                 diff = abs(current_flaps - target_flaps)
                 
-                if is_sentinel:
+                if not new_text.strip():
+                    st.caption("🔇 SILENCE / NOISE")
+                elif is_sentinel:
                     st.error("⚠️ AI ERROR")
                 elif diff == 0:
                     st.success("SYNC OK")
@@ -422,8 +549,8 @@ def render_dubbing_pipeline():
                 if engine and engine != 'unknown':
                     st.caption(f"🤖 {engine.upper()}")
                 
-                # Auto-Refactor Logic (Self-Healing)
-                if diff > 2 and i not in st.session_state.auto_refactored and not needs_rerun:
+                # Auto-Refactor Logic (Self-Healing) - Only for non-empty English text
+                if new_text.strip() and not is_japanese(new_text) and diff > 2 and i not in st.session_state.auto_refactored and not needs_rerun:
                     st.session_state.auto_refactored.add(i)
                     st.toast(f"🪄 Auto-Refactoring Segment {i+1}...", icon="🔄")
                     payload = {
@@ -437,7 +564,6 @@ def render_dubbing_pipeline():
                         if r.status_code == 200:
                             data = r.json()
                             st.session_state.segments[i]['translation'] = data['text']
-                            st.session_state[f"seg_input_{i}_{st.session_state.active_job_id}"] = data['text']
                             st.session_state.segments[i]['last_engine'] = data.get('engine', 'auto')
                             needs_rerun = True
                         else:
@@ -464,7 +590,6 @@ def render_dubbing_pipeline():
                             if r.status_code == 200:
                                 data = r.json()
                                 st.session_state.segments[i]['translation'] = data['text']
-                                st.session_state[f"seg_input_{i}_{st.session_state.active_job_id}"] = data['text']
                                 st.session_state.segments[i]['last_engine'] = data.get('engine', 'unknown')
                                 st.session_state.auto_refactored.add(i) 
                                 status.update(label=f"Sync Restored via {data.get('engine', 'AI')}", state="complete")

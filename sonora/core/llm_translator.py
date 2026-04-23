@@ -80,34 +80,57 @@ class GeminiTranslator:
         except Exception as e:
             logger.error(f"Failed to initialize Gemini: {e}")
 
-    @retry_api_call(max_retries=3, base_delay=1)
+    @retry_api_call(max_retries=2, base_delay=1) # Reduced retries per model to speed up fallback
     def translate(self, prompt: str) -> str:
-        """Translates text using Google Gemini with verified model fallback."""
+        """Translates text using Google Gemini with iterative model fallback and strict timeouts."""
         if not self.client:
             raise ImportError("Gemini client not initialized.")
             
-        try:
-            # Gemini Python SDK doesn't have a direct timeout param in generate_content, 
-            # so we use request_options if supported or rely on the retry wrapper.
-            response = self.client.generate_content(prompt)
-            # Response might be blocked by safety filters
-            if hasattr(response, 'text'):
-                return response.text.strip()
-            return "[SAFETY BLOCKED]"
-        except Exception as e:
-            # Fallback chain based on verified Cloud Probe results
-            import google.generativeai as genai
-            if self.model == "gemini-1.5-flash":
-                logger.warning(f"Gemini 1.5-Flash failed: {e}. Falling back to gemini-flash-latest...")
-                self.model = "gemini-flash-latest"
-            elif self.model == "gemini-flash-latest":
-                logger.warning(f"Gemini-Flash-Latest failed: {e}. Falling back to gemini-pro-latest...")
-                self.model = "gemini-pro-latest"
-            else:
-                raise e # End of verified chain
+        models_to_try = [self.model, "gemini-1.5-flash", "gemini-flash-latest", "gemini-pro-latest"]
+        # De-duplicate while preserving order
+        unique_models = []
+        for m in models_to_try:
+            if m not in unique_models:
+                unique_models.append(m)
+        
+        last_exception = None
+        for model_name in unique_models:
+            try:
+                logger.info(f"🧬 [GEMINI] Attempting translation via {model_name}...")
+                import google.generativeai as genai
+                current_model = genai.GenerativeModel(
+                    model_name=model_name,
+                    generation_config={"temperature": 0.1}
+                )
                 
-            self.client = genai.GenerativeModel(self.model)
-            return self.translate(prompt)
+                # Use request_options to set a strict 25s timeout for the API call itself
+                response = current_model.generate_content(
+                    prompt, 
+                    request_options={"timeout": 25.0}
+                )
+                
+                if hasattr(response, 'text'):
+                    # Update active model on success to 'stick' to working models
+                    self.model = model_name
+                    self.client = current_model
+                    return response.text.strip()
+                
+                return "[SAFETY BLOCKED]"
+            except Exception as e:
+                last_exception = e
+                err_msg = str(e).lower()
+                logger.warning(f"⚠️ [GEMINI] Model {model_name} failed: {e}")
+                
+                # If it's a 429 (Quota), don't bother trying other models on this segment, 
+                # let the HardenedTranslator handle the provider-level fallback instantly.
+                if "429" in err_msg or "quota" in err_msg:
+                    raise e
+                
+                continue # Try next model in chain
+        
+        if last_exception:
+            raise last_exception
+        return "[ERROR: NO MODELS AVAILABLE]"
 
     @retry_api_call(max_retries=1, base_delay=1) # Fast Fail for 429s
     def translate_batch(self, prompts: List[str]) -> List[str]:
@@ -124,7 +147,13 @@ class GeminiTranslator:
         )
         
         try:
-            response = self.client.generate_content(batch_prompt)
+            # Add timeout to batch call as well
+            response = self.client.generate_content(batch_prompt, request_options={"timeout": 60.0})
+            
+            if not hasattr(response, 'text'):
+                logger.warning("Gemini Batch response blocked by safety filters.")
+                raise ValueError("Safety blocked batch")
+                
             text = response.text.strip()
             # Clean up potential markdown formatting
             if "```json" in text:
@@ -135,16 +164,25 @@ class GeminiTranslator:
             results = json.loads(text)
             if isinstance(results, list) and len(results) == len(prompts):
                 return results
-            return [f"[BATCH ERROR] {p[:20]}..." for p in prompts]
+            
+            logger.warning("Gemini Batch JSON parse failed or length mismatch. Falling back to serial.")
+            raise ValueError("Corrupt batch response")
         except Exception as e:
-            logger.error(f"Gemini Batch Translation failed: {e}")
-            # Individual fallback if batch fails
+            # If it's a 429, raising here triggers HardenedTranslator provider-level fallback
+            if "429" in str(e) or "quota" in str(e).lower():
+                raise e
+                
+            logger.error(f"Gemini Batch Translation failed: {e}. Executing sequential surgery...")
             results = []
             for p in prompts:
-                results.append(self.translate(p))
+                try:
+                    results.append(self.translate(p))
+                except:
+                    results.append("[ERROR]")
+                
                 # Only sleep for Gemini Free Tier (protecting RPM)
                 if "flash" in self.model:
-                    time.sleep(1.0) 
+                    time.sleep(0.5) # Reduced from 1.0 to speed up recovery
             return results
 
 class GroqTranslator:
@@ -275,44 +313,63 @@ class HardenedTranslator:
                             return {"text": result, "provider": next_provider}
                         except Exception as inner_e:
                             logger.error(f"Fallback to {next_provider} failed: {inner_e}")
-                            continue
                             
                 return {"text": "[RATE LIMIT: ALL PROVIDERS EXHAUSTED]", "provider": "error"}
                 
             logger.error(f"Cloud translation completely failed: {e}")
-            return {"text": f"[ERROR] {str(e)[:50]}...", "provider": "error"}
+            return {"text": "[ERROR: API FAULT]", "provider": "error"}
 
     def translate_batch(self, prompts: List[str]) -> List[Union[str, Dict[str, str]]]:
         if self.mock_mode:
             return [{"text": f"[MOCK BATCH] {p[:20]}", "provider": "mock"} for p in prompts]
             
+        # Global Quota Check: If we recently hit a rate limit, stay in conservative mode
+        if self.concurrency_mode == "conservative" and (time.time() - self.last_quota_error > 60):
+            self.concurrency_mode = "burst"
+            logger.info("🟢 Quota Restored. Returning to Burst Mode.")
+
         try:
             # 1. Try native provider batching first (Speed Layer)
             if hasattr(self.translator, 'translate_batch'):
                 results = self.translator.translate_batch(prompts)
-                if results and isinstance(results[0], str) and ("[BATCH ERROR]" in results[0] or "[RATE LIMIT]" in results[0]):
-                    raise RuntimeError("Native batch failed")
-                return results
                 
+                # If Gemini's native batch failed and it already did its own internal sequential fallback,
+                # we return those results instead of triggering ANOTHER sequential block here.
+                if results and len(results) == len(prompts):
+                    return results
+
             raise AttributeError("Serial fallback required")
             
-        except Exception:
+        except Exception as e:
             # 2. Parallel Burst Fallback (Concurrency Layer)
             # Use high concurrency for Groq/OpenAI, serial for Gemini
             is_fast_provider = self.provider in ["groq", "openai", "anthropic"]
             
-            # Auto-Recovery for Circuit Breaker
-            if self.concurrency_mode == "conservative" and (time.time() - self.last_quota_error > 60):
-                self.concurrency_mode = "burst"
-                logger.info("🟢 Quota Restored. Returning to Burst Mode (5 threads).")
-
             if is_fast_provider and self.concurrency_mode == "burst":
                 logger.info(f"⚡ [FAST-PATH] Bursting {len(prompts)} translations via {self.provider}...")
                 from concurrent.futures import ThreadPoolExecutor
-                # Burst Throttler: 5 workers is the Sweet Spot for Groq RPM stability
-                with ThreadPoolExecutor(max_workers=5) as executor:
-                    return list(executor.map(self.translate, prompts))
+                
+                def safe_translate(p):
+                    try:
+                        return self.translate(p)
+                    except Exception as e:
+                        logger.error(f"Parallel segment failed: {e}")
+                        return {"text": "[RATE LIMIT: RETRY LATER]", "provider": "error"}
+
+                # Use a slightly larger pool for fast providers to saturate throughput
+                with ThreadPoolExecutor(max_workers=8) as executor:
+                    return list(executor.map(safe_translate, prompts))
             else:
-                # Conservative fallback: Process one by one to avoid further 429s
-                logger.info(f"🐢 [CONSERVATIVE] Processing {len(prompts)} translations sequentially...")
-                return [self.translate(p) for p in prompts]
+                # 3. Conservative Fallback: Throttled sequential processing
+                logger.info(f"🐢 [CONSERVATIVE] Processing {len(prompts)} translations via {self.provider}...")
+                results = []
+                for p in prompts:
+                    try:
+                        results.append(self.translate(p))
+                    except:
+                        results.append({"text": "[ERROR]", "provider": "error"})
+                    
+                    # Mandatory breather for Free Tier stability: 2.5s for Gemini, 0.5s for others
+                    delay = 2.0 if self.provider == "gemini" else 0.5
+                    time.sleep(delay)
+                return results

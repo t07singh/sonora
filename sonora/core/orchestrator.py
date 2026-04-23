@@ -144,10 +144,22 @@ class SonoraOrchestrator:
         from src.services.sync.wav2lip_engine import Wav2LipEngine
         self.sync_engine = Wav2LipEngine()
         
+        # --- ZERO-TRUST NETWORK AUTO-FIX ---
+        # On Windows, Docker-internal hostnames like 'sonora-transcriber' will fail to resolve.
+        # We detect this mismatch and force CLOUD_OFFLOAD to ensure the pipeline doesn't crash.
+        is_windows = os.name == 'nt'
+        target_transcriber = os.getenv("TRANSCRIBER_URL", "sonora-transcriber")
+        target_separator = os.getenv("SEPARATOR_URL", "sonora-separator")
+        
+        if is_windows and ("sonora-" in target_transcriber or "sonora-" in target_separator):
+            logger.warning("🛰️ [ENV-AUTO-FIX] Windows/Docker mismatch detected. Forcing CLOUD_OFFLOAD=true for resilience.")
+            os.environ["CLOUD_OFFLOAD"] = "true"
+
         # Initialize Separator: Respect Cloud Offload setting
         cloud_offload = os.getenv("CLOUD_OFFLOAD", "false").lower() == "true"
+        from src.services.separator.audio_separator import AudioSeparator, SeparationModel
         model_selection = SeparationModel.CLOUD_DEMUCS if cloud_offload else SeparationModel.SWARM_DEMUCS
-        logger.info(f"🌊 Orchestrator: Initializing Separator with {model_selection.value}")
+        logger.info(f"🌊 Orchestrator: Initializing Separator with {model_selection.value} (Cloud: {cloud_offload})")
         self.separator = AudioSeparator(model=model_selection)
 
     def update_status(self, msg: str):
@@ -177,16 +189,20 @@ class SonoraOrchestrator:
                 seg_words = interpolate_words_from_text(seg.get("text", ""), seg.get("start", 0), seg.get("end", 0))
             words.extend(seg_words)
             
-        # 2. Attach speakers to words
+        # 2. Attach speakers to words using maximum overlap
         for word in words:
-            mid = (word['start'] + word['end']) / 2
-            # Find speaker at midpoint
+            w_start = word['start']
+            w_end = word['end']
+            max_overlap = -1
             assigned_speaker = "UNKNOWN"
+            
             for s_seg in speaker_segments:
-                if s_seg['start'] <= mid <= s_seg['end']:
+                overlap = min(w_end, s_seg['end']) - max(w_start, s_seg['start'])
+                if overlap > max_overlap:
+                    max_overlap = overlap
                     assigned_speaker = s_seg['speaker']
-                    break
-            word['speaker'] = assigned_speaker
+            
+            word['speaker'] = assigned_speaker if max_overlap > 0 else "UNKNOWN"
 
         # Hardened fallback to prevent UI hanging on empty [ ] translation
         if not words:
@@ -263,8 +279,10 @@ class SonoraOrchestrator:
         translations = []
         for i, seg in enumerate(segments):
             # Simple direct translation for the sequence demo
-            translation = await self.translate_segment(seg)
-            translations.append(translation)
+            res = await self.translate_segment(seg)
+            # Ensure we pass strings to the synthesizer
+            text = res.get("text", "[ERROR]") if isinstance(res, dict) else res
+            translations.append(text)
             
         takes = await self.synthesize_segments(segments, translations, voice_id)
         
@@ -292,12 +310,14 @@ class SonoraOrchestrator:
         constraint = "EXACTLY" if target_syllables < 12 else "CLOSE TO"
         
         return (
-            f"You are Gemini, the Core Intelligence translator for Sonora. "
+            f"You are Gemini, the Core Intelligence translator for Sonora Studio. "
             f"CRITICAL: If the input text is just noise, a breath, a cough, or non-verbal sound (like '...', 'oh', 'ah' with no context), respond ONLY with '[EXTRANEOUS]'.\n"
             f"CRITICAL: DO NOT include filler words or emotions. Respond ONLY with the translated text.\n"
-            f"Translate the following to English in {style} style. "
+            f"TASK: Translate the following Japanese text into English for an {style} dub. "
+            f"The translation must be natural-sounding and follow character personality.\n"
             f"CONSTRAINT: Your English translation should be {constraint} {target_syllables} syllables.\n"
-            f"Text: {text}"
+            f"Japanese Text: {text}\n"
+            f"English Translation:"
         )
 
     async def translate_segments_batch(self, segments_raw: List[List[Dict]], style: str = "Anime") -> List[str]:

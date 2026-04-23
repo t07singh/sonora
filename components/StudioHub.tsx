@@ -134,7 +134,7 @@ const StudioHub: React.FC<{
             onClick={() => !isProcessing && fileInputRef.current?.click()}
             className={`w-48 h-48 bg-slate-50 dark:bg-slate-900 rounded-[56px] border-4 border-dashed border-slate-200 dark:border-slate-800 flex flex-col items-center justify-center cursor-pointer hover:border-primary hover:bg-white dark:hover:bg-slate-800 transition-all shadow-sm group ${isProcessing ? 'animate-pulse scale-95 border-primary' : ''}`}
           >
-            <input type="file" ref={fileInputRef} className="hidden" accept="video/*,audio/*" onChange={e => e.target.files && handleIngestion(e.target.files[0])} />
+            <input type="file" ref={fileInputRef} className="hidden" onChange={e => e.target.files && handleIngestion(e.target.files[0])} />
             <div className="text-5xl mb-4 group-hover:rotate-6 transition-transform">{isProcessing ? '🧬' : '📂'}</div>
             <span className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 group-hover:text-primary transition-colors">Import media</span>
           </div>
