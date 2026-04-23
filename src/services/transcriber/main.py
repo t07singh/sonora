@@ -6,7 +6,7 @@ import time
 import logging
 from src.core.reliability import get_device, HardwareLock
 from faster_whisper import WhisperModel
-from src.services.transcriber.segmenter import get_segmenter
+# from src.services.transcriber.segmenter import get_segmenter (Moved to lazy import)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -191,6 +191,7 @@ async def segment_video(payload: dict):
     async with HardwareLock.locked_async("Whisper-Segmentation", priority=1):
         try:
             logger.info(f"✂️ [SEGMENTATION] Cutting video: {video_path}")
+            from src.services.transcriber.segmenter import get_segmenter
             segmenter = get_segmenter()
             
             # Use to_thread for heavy CPU/GPU blocking operations

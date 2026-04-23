@@ -12,7 +12,7 @@ services:
       - "8501:8501"
     volumes:
       - .:/app
-      - sonora-shared:/tmp/sonora
+      - ./sonora/data:/tmp/sonora
     env_file:
       - .env
     environment:
@@ -23,6 +23,7 @@ services:
       - SHARED_PATH=/tmp/sonora
       - SONORA_MODE=production
       - CLOUD_OFFLOAD=true
+      - SONORA_DATA_DIR=/tmp/sonora
     depends_on:
       - sonora-api
       - redis-cache
@@ -42,7 +43,7 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
-      - sonora-shared:/tmp/sonora
+      - ./sonora/data:/tmp/sonora
     env_file:
       - .env
     environment:
@@ -55,6 +56,7 @@ services:
       - SHARED_PATH=/tmp/sonora
       - SONORA_MODE=production
       - CLOUD_OFFLOAD=true
+      - SONORA_DATA_DIR=/tmp/sonora
     depends_on:
       - redis-cache
       - sonora-segmenter
@@ -74,7 +76,7 @@ services:
       - "8001:8001"
     volumes:
       - .:/app
-      - sonora-shared:/tmp/sonora
+      - ./sonora/data:/tmp/sonora
     env_file:
       - .env
     environment:
@@ -83,10 +85,13 @@ services:
       - SHARED_PATH=/tmp/sonora
       - SONORA_MODE=production
       - CLOUD_OFFLOAD=true
+      - SONORA_DATA_DIR=/tmp/sonora
     depends_on:
       - redis-cache
     networks:
       - sonora-network
+    security_opt:
+      - seccomp:unconfined
 
   # ─────────────────────────────────────────────
   # SONORA SEPARATOR (Port 8003) — Demucs / Cloud HF Spaces
@@ -101,7 +106,7 @@ services:
       - "8003:8000"
     volumes:
       - .:/app
-      - sonora-shared:/tmp/sonora
+      - ./sonora/data:/tmp/sonora
     env_file:
       - .env
     environment:
@@ -109,6 +114,7 @@ services:
       - SHARED_PATH=/tmp/sonora
       - SONORA_MODE=production
       - CLOUD_OFFLOAD=true
+      - SONORA_DATA_DIR=/tmp/sonora
     depends_on:
       - redis-cache
     networks:
@@ -127,7 +133,7 @@ services:
       - "8002:8002"
     volumes:
       - .:/app
-      - sonora-shared:/tmp/sonora
+      - ./sonora/data:/tmp/sonora
     env_file:
       - .env
     environment:
@@ -135,6 +141,7 @@ services:
       - SHARED_PATH=/tmp/sonora
       - SONORA_MODE=production
       - CLOUD_OFFLOAD=true
+      - SONORA_DATA_DIR=/tmp/sonora
     depends_on:
       - redis-cache
     networks:

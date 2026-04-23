@@ -202,7 +202,16 @@ class AudioSeparator:
                             model_used="swarm_separator_v4"
                         )
                 except Exception as e:
-                    logger.error(f"Swarm separation failed, falling back: {e}")
+                    logger.error(f"Swarm separation failed: {e}. Falling back to Cloud-Direct isolation.")
+                    isolated_path = shadow_providers.cloud_separate_audio(str(audio_path))
+                    voice, sr = librosa.load(isolated_path, sr=self.sample_rate)
+                    return SeparationResult(
+                        voice=voice,
+                        music=np.zeros_like(voice),
+                        sample_rate=sr,
+                        duration=len(voice) / sr,
+                        model_used="gradio_cloud_fallback"
+                    )
 
             try:
                 logger.info(f"🧬 [REASONING] Starting local separation using {self.model.value} device={self.device}")

@@ -7,6 +7,11 @@ import asyncio
 import os
 import sys
 import logging
+from dotenv import load_dotenv
+
+# Load environment variables at startup (force override)
+load_dotenv(override=True)
+print(f"🚀 [INIT] CLOUD_OFFLOAD: {os.getenv('CLOUD_OFFLOAD')}")
 
 logger = logging.getLogger("sonora.api")
 
@@ -125,6 +130,56 @@ def load_jobs():
 # Load on startup
 load_jobs()
 
+def cut_segments_locally(video_path: str, segments: list, shared_path: str):
+    """Surgical utility to cut video clips locally in the API container."""
+    import ffmpeg
+    import os
+    
+    # Target directory for segments
+    base_name = os.path.basename(video_path).split('.')[0]
+    output_dir = os.path.join(shared_path, "segments", base_name)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    logger.info(f"🏗️ [SURGERY] Locally cutting {len(segments)} segments into {output_dir}")
+    
+    for seg in segments:
+        i = seg["id"]
+        start = seg["start"]
+        end = seg["end"]
+        duration = end - start
+        speaker = seg.get("speaker", "UNKNOWN")
+        
+        clip_name = f"segment_{int(i):04d}_{speaker}.mp4"
+        clip_path = os.path.join(output_dir, clip_name)
+        
+        try:
+            # Shift from 'copy' to high-quality re-encoding (crf 18) to ensure frame-accurate video
+            # even when seeking between keyframes. map 0:v:0 ensures video is kept.
+            (
+                ffmpeg
+                .input(video_path, ss=start)
+                .output(clip_path, t=duration, vcodec='libx264', acodec='aac', ab='192k', crf=18, preset='ultrafast')
+                .overwrite_output()
+                .run(quiet=True, capture_stdout=True, capture_stderr=True)
+            )
+            # Update segment with paths
+            seg["clip_path"] = clip_path
+            seg["relative_clip_path"] = os.path.relpath(clip_path, shared_path)
+        except Exception as e:
+            logger.error(f"❌ [SURGERY FAILED] Segment {i}: {e}. Falling back to re-encoded cut.")
+            try:
+                (
+                    ffmpeg
+                    .input(video_path, ss=start)
+                    .output(clip_path, t=duration, vcodec='libx264', acodec='aac', preset='ultrafast')
+                    .overwrite_output()
+                    .run(quiet=True, capture_stdout=True, capture_stderr=True)
+                )
+                seg["clip_path"] = clip_path
+                seg["relative_clip_path"] = os.path.relpath(clip_path, shared_path)
+            except Exception as e2:
+                logger.error(f"❌ [FATAL SURGERY] Segment {i}: {e2}")
+
 # --- Helper for Background Processing ---
 async def background_segmentation(job_id: str, video_path: str, language: str = "ja",
                                        mode: str = "fast", cut_clips: bool = True,
@@ -223,7 +278,9 @@ async def background_segmentation(job_id: str, video_path: str, language: str = 
         raise Exception("Segmentation timed out after 10 minutes")
 
     except Exception as e:
+        import traceback
         logger.error(f"Segmentation Proxy Job {job_id} failed: {e}")
+        logger.error(traceback.format_exc())
         analysis_jobs[job_id]["status"] = "Error"
         analysis_jobs[job_id]["error"] = str(e)
         save_jobs()

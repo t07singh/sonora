@@ -13,9 +13,16 @@ logger = logging.getLogger("sonora.path_manager")
 
 def get_data_dir() -> Path:
     """Returns the root data directory from env or default."""
-    env_path = os.getenv("SONORA_DATA_DIR")
+    # Priority: Explicit Data Dir -> Shared Storage (Docker) -> Local Default
+    env_path = os.getenv("SONORA_DATA_DIR") or os.getenv("SHARED_PATH")
     if env_path:
-        return Path(env_path).absolute()
+        path = Path(env_path)
+        # If it's "/tmp/sonora" in Docker, it's already absolute
+        # If it's relative, we make it absolute to current workdir
+        if not path.is_absolute():
+            path = path.absolute()
+        return path
+        
     # Default: project_root/sonora/data
     return Path("sonora/data").absolute()
 

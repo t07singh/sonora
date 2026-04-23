@@ -5,13 +5,22 @@ services:
     image: sonora-studio/ui:prod
     build:
       context: .
-      dockerfile: src/cockpit/Dockerfile
+      dockerfile: Dockerfile.ui
     restart: always
     ports:
       - "8501:8501"
     volumes:
-      - sonora_data:/app/sonora/data
+      - sonora_data:/tmp/sonora
     env_file: .env
+    environment:
+      - SEPARATOR_URL=http://sonora-separator:8000/process
+      - TRANSCRIBER_URL=http://sonora-transcriber:8001/transcribe
+      - SYNTHESIZER_URL=http://sonora-synthesizer:8002/synthesize
+      - BACKEND_URL=http://sonora-api:8000
+      - SHARED_PATH=/tmp/sonora
+      - SONORA_DATA_DIR=/tmp/sonora
+      - SONORA_MODE=production
+      - CLOUD_OFFLOAD=true
     depends_on:
       - redis-cache
       - sonora-api
@@ -27,8 +36,18 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - sonora_data:/app/sonora/data
+      - sonora_data:/tmp/sonora
     env_file: .env
+    environment:
+      - SEPARATOR_URL=http://sonora-separator:8000/process
+      - TRANSCRIBER_URL=http://sonora-transcriber:8001/transcribe
+      - SYNTHESIZER_URL=http://sonora-synthesizer:8002/synthesize
+      - SEGMENTER_URL=http://sonora-segmenter:8004
+      - REDIS_URL=redis://redis-cache:6379/0
+      - SHARED_PATH=/tmp/sonora
+      - SONORA_DATA_DIR=/tmp/sonora
+      - SONORA_MODE=production
+      - CLOUD_OFFLOAD=true
     depends_on:
       - redis-cache
     networks:
@@ -43,8 +62,36 @@ services:
       dockerfile: src/services/transcriber/Dockerfile
     restart: on-failure
     volumes:
-      - sonora_data:/app/sonora/data
+      - sonora_data:/tmp/sonora
     env_file: .env
+    environment:
+      - WHISPER_MODEL=large-v3
+      - REDIS_URL=redis://redis-cache:6379/0
+      - SHARED_PATH=/tmp/sonora
+      - SONORA_DATA_DIR=/tmp/sonora
+      - SONORA_MODE=production
+      - CLOUD_OFFLOAD=true
+    # GPU Reservation Removed for CPU Mode
+    networks:
+      - sonora-network
+    security_opt:
+      - seccomp:unconfined
+
+  sonora-separator:
+    image: sonora-studio/separator:prod
+    build:
+      context: .
+      dockerfile: src/services/separator/Dockerfile
+    restart: on-failure
+    volumes:
+      - sonora_data:/tmp/sonora
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://redis-cache:6379/0
+      - SHARED_PATH=/tmp/sonora
+      - SONORA_DATA_DIR=/tmp/sonora
+      - SONORA_MODE=production
+      - CLOUD_OFFLOAD=true
     # GPU Reservation Removed for CPU Mode
     networks:
       - sonora-network
@@ -56,8 +103,37 @@ services:
       dockerfile: src/services/synthesizer/Dockerfile
     restart: on-failure
     volumes:
-      - sonora_data:/app/sonora/data
+      - sonora_data:/tmp/sonora
     env_file: .env
+    environment:
+      - REDIS_URL=redis://redis-cache:6379/0
+      - SHARED_PATH=/tmp/sonora
+      - SONORA_DATA_DIR=/tmp/sonora
+      - SONORA_MODE=production
+      - CLOUD_OFFLOAD=true
+    # GPU Reservation Removed for CPU Mode
+    networks:
+      - sonora-network
+
+  sonora-segmenter:
+    image: sonora-studio/segmenter:prod
+    build:
+      context: .
+      dockerfile: src/services/segmenter/Dockerfile
+    restart: on-failure
+    volumes:
+      - sonora_data:/tmp/sonora
+    env_file: .env
+    environment:
+      - SEGMENTER_PORT=8004
+      - WHISPER_MODEL=large-v3
+      - SEGMENTER_MODE=fast
+      - ALIGNER_TYPE=qwen3
+      - HF_TOKEN=${HF_TOKEN}
+      - REDIS_URL=redis://redis-cache:6379/0
+      - SHARED_PATH=/tmp/sonora
+      - SONORA_DATA_DIR=/tmp/sonora
+      - SONORA_MODE=production
     # GPU Reservation Removed for CPU Mode
     networks:
       - sonora-network

@@ -101,7 +101,7 @@ const ProductionHub: React.FC<ProductionHubProps> = ({ profiles, setProfiles, ad
               </p>
             </div>
             <div className="relative">
-              <input type="file" multiple className="hidden" ref={batchInputRef} accept="video/*" />
+              <input type="file" multiple className="hidden" ref={batchInputRef} />
               <button 
                 onClick={() => batchInputRef.current?.click()}
                 className="gradient-btn text-white px-8 py-4 rounded-2xl text-[10px] font-black tracking-widest shadow-xl active:scale-95 transition-all"

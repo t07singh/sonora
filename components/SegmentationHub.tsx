@@ -267,7 +267,7 @@ const SegmentationHub: React.FC<{
                   </div>
                </div>
             )}
-            <input type="file" ref={fileInputRef} className="hidden" accept="video/*" onChange={e => e.target.files && handleFileSelect(e.target.files[0])} />
+            <input type="file" ref={fileInputRef} className="hidden" onChange={e => e.target.files && handleFileSelect(e.target.files[0])} />
             <div className="text-6xl mb-4 group-hover:scale-110 transition-transform">🎞️</div>
             <span className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 group-hover:text-primary transition-colors">Dissect Video</span>
           </div>

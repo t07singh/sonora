@@ -290,8 +290,9 @@ def _ensure_mp3(audio_path: str) -> str:
     import ffmpeg
     import os
     import hashlib
+    from sonora.audio_editing.path_manager import get_data_dir
     
-    shared_dir = os.getenv("SHARED_PATH", "/tmp/sonora")
+    shared_dir = str(get_data_dir())
     os.makedirs(shared_dir, exist_ok=True)
     
     # Generate unique hash for this audio path to avoid redundant conversions
@@ -305,6 +306,9 @@ def _ensure_mp3(audio_path: str) -> str:
         
     try:
         logger.info(f"FFmpeg: Extracting portable MP3 from {audio_path}...")
+        # Ensure target directory exists for the conversion output
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        
         (
             ffmpeg.input(audio_path)
             .output(out_path, ac=1, ar='16k', audio_bitrate='128k')
@@ -313,7 +317,9 @@ def _ensure_mp3(audio_path: str) -> str:
         )
         return out_path
     except Exception as e:
-        logger.error(f"FFmpeg MP3 extraction failed for {audio_path}: {e}")
+        stderr = getattr(e, 'stderr', b'').decode() if hasattr(e, 'stderr') else str(e)
+        logger.error(f"FFmpeg MP3 extraction failed for {audio_path}: {stderr}")
+        # If extraction failed, return original but it might fail later in Groq/OpenAI
         return audio_path
 
 def cloud_run_transcription(audio_path: str) -> list:

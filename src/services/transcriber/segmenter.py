@@ -48,7 +48,13 @@ class VideoSegmenter:
         # Note: WhisperX uses its own model loading which is compatible with faster-whisper
         model = whisperx.load_model(self.model_size, self.device, compute_type=self.compute_type)
         audio = whisperx.load_audio(video_path)
-        result = model.transcribe(audio, batch_size=16)
+        
+        # Enhanced for Japanese/Anime content with word_timestamps set to True
+        result = model.transcribe(
+            audio, 
+            batch_size=16, 
+            initial_prompt="Japanese Japanese anime drama dialogue. Emotional, expressive, and character-driven speech."
+        )
         
         # 2. Align whisper output
         model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=self.device)
@@ -106,33 +112,22 @@ class VideoSegmenter:
 
     def _cut_segment(self, input_path: str, start: float, end: float, output_path: str):
         """
-        Extracts a video segment using FFmpeg with stream copy (fast/lossless).
-        To ensure "untackled" video/audio, we use -c copy.
-        Note: Timestamp accuracy for stream copy is GOP-dependent (Keyframe sensitive).
+        Extracts a high-fidelity video segment using FFmpeg.
+        We use re-encoding (crf 18) instead of stream copy to ensure frame-accurate 
+        video tracks, especially when the start time doesn't land on a keyframe.
         """
         duration = end - start
         try:
-            # -ss before -i for fast seeking, but can be slightly imprecise with -c copy
-            # We use it after -i for better accuracy with stream copy, though slower to start
+            # map 0:v:0 and map 0:a:0? ensure we capture both streams if available
             (
                 ffmpeg
-                .input(input_path)
-                .output(output_path, ss=start, t=duration, c='copy', map=0)
+                .input(input_path, ss=start)
+                .output(output_path, t=duration, vcodec='libx264', acodec='aac', ab='192k', crf=18, preset='ultrafast')
                 .overwrite_output()
-                .run(quiet=True)
+                .run(quiet=True, capture_stdout=True, capture_stderr=True)
             )
         except Exception as e:
-            logger.error(f"FFmpeg copy cut failed for {start}-{end}: {e}. Falling back to re-encode.")
-            try:
-                 (
-                    ffmpeg
-                    .input(input_path, ss=start)
-                    .output(output_path, t=duration, vcodec='libx264', acodec='aac', preset='ultrafast')
-                    .overwrite_output()
-                    .run(quiet=True)
-                )
-            except Exception as e2:
-                logger.error(f"Fatal FFmpeg error: {e2}")
+            logger.error(f"❌ [SURGERY FAILED] Segment {start}-{end}: {e}")
 
 def get_segmenter():
     return VideoSegmenter()

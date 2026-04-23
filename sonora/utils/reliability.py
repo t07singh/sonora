@@ -35,7 +35,7 @@ def retry_api_call(max_retries=3, base_delay=1):
                         raise e
                     
                     if "limit: 0" in err_str:
-                        logger.error(f"⚠️ [QUOTA EXHAUSTED] {func.__name__} hit zero-limit quota. Failing fast to avoid hangs.")
+                        logger.warning(f"🚦 [QUOTA DEPLETED] {func.__name__} hit zero-limit quota. Re-raising for translator fallback.")
                         raise e
 
                     if retries > max_retries:
