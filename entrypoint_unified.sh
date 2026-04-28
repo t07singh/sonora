@@ -25,5 +25,5 @@ if ! kill -0 $BACKEND_PID 2>/dev/null; then
 fi
 
 # 3. Start the Streamlit frontend in the foreground
-echo "🎙️ Launching Streamlit UI on port 8501..."
-streamlit run unified_demo.py --server.port=8501 --server.address=0.0.0.0
+echo "🎙️ Launching Streamlit UI on port 7860 (Hugging Face Spaces requirement)..."
+streamlit run unified_demo.py --server.port=7860 --server.address=0.0.0.0

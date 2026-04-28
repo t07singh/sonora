@@ -22,16 +22,24 @@ RUN pip install --no-cache-dir "torch>=2.0.0" "torchaudio>=2.0.0" "numpy<2.0.0" 
 # Install remaining dependencies including demucs and faster-whisper
 RUN pip install --no-cache-dir --default-timeout=1000 -r requirements_core.txt
 
-COPY . .
+RUN useradd -m -u 1000 user
+USER user
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH
 
-ENV PYTHONPATH=/app
+WORKDIR $HOME/app
+
+COPY --chown=user . $HOME/app
+
+ENV PYTHONPATH=$HOME/app
 
 # Fix Windows line endings and set permissions
+USER root
 RUN apt-get update && apt-get install -y sed && \
     sed -i 's/\r$//' entrypoint_unified.sh && \
     chmod +x entrypoint_unified.sh
+USER user
 
-EXPOSE 8000
-EXPOSE 8501
+EXPOSE 7860
 
 CMD ["./entrypoint_unified.sh"]
