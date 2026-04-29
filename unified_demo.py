@@ -109,7 +109,7 @@ if 'auto_refactored' not in st.session_state:
     st.session_state.auto_refactored = set()
 
 # Support Docker environment variables
-API_BASE = os.getenv("BACKEND_URL", "http://localhost:8000")
+API_BASE = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 ENDPOINTS = {
     "dub": f"{API_BASE}/api/dub",
     "analyze": f"{API_BASE}/api/analyze",
