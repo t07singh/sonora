@@ -322,6 +322,18 @@ async def health_check():
     )
 
 
+@app.get("/debug/jobs")
+async def debug_jobs():
+    """Return the entire internal jobs registry for debugging."""
+    return {
+        "count": len(segmentation_jobs),
+        "jobs": segmentation_jobs,
+        "shared_path": SHARED_PATH,
+        "data_dir": SONORA_DATA_DIR,
+        "hf_token_present": HF_TOKEN is not None
+    }
+
+
 @app.post("/segment", response_model=SegmentationResponse)
 async def segment_video(req: SegmentRequest, background_tasks: BackgroundTasks):
     """

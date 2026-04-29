@@ -15,12 +15,15 @@ python scripts/bundle_weights.py
 # 1. Start the Segmenter service (on port 8004)
 echo "🛰️ Launching Sonora Segmenter Service on port 8004..."
 export SEGMENTER_URL="http://127.0.0.1:8004"
-python src/services/segmenter/main.py &
+uvicorn src.services.segmenter.main:app --host 0.0.0.0 --port 8004 --log-level info &
 SEGMENTER_PID=$!
+sleep 2
+echo "💓 Segmenter heartbeat check..."
+curl -s http://127.0.0.1:8004/health || echo "⚠️ Segmenter health check failed!"
 
 # 2. Start the FastAPI backend in the background (on port 8000)
 echo "🚀 Launching FastAPI Backend on port 8000..."
-python run_server.py &
+uvicorn run_server:app --host 0.0.0.0 --port 8000 --log-level info &
 BACKEND_PID=$!
 
 # 2. Wait a few seconds for the backend to initialize
