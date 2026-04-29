@@ -19,13 +19,13 @@ def main():
     print("Starting Sonora/Auralis AI Dubbing API Server")
     print("=" * 50)
     
-    # Check if we're in the right directory or in Docker (/app)
-    is_docker = Path("/app/api/server.py").exists()
-    is_local = Path("api/server.py").exists()
+    # Check if we're in the right directory
+    is_code_found = Path("api/server.py").exists() or Path("/app/api/server.py").exists() or Path(os.getenv("HOME", "")) .joinpath("app/api/server.py").exists()
     
-    if not (is_docker or is_local):
+    if not is_code_found:
         print("Error: api/server.py not found")
-        print("Please run this script from the sonora project root directory or ensure volume is mapped.")
+        print(f"Current Directory: {os.getcwd()}")
+        print("Please run this script from the sonora project root directory.")
         return
     
     # Load environment variables from .env
@@ -54,11 +54,9 @@ def main():
         print("⚠ ELEVENLABS_API_KEY not found (using mock)")
     
     print("\nServer will be available at:")
-    print("   http://localhost:8000")
-    print("   http://localhost:8000/docs (API documentation)")
-    print("   http://localhost:8000/health (health check)")
-    print("\nAPI Endpoints:")
-    print("   POST /api/dub - Upload audio file for dubbing")
+    print("   http://0.0.0.0:8000")
+    print("   http://0.0.0.0:8000/docs (API documentation)")
+    print("   http://0.0.0.0:8000/health (health check)")
     print("\nStarting server...")
     
     # Import and run the server
@@ -66,41 +64,15 @@ def main():
         import uvicorn
         
         # Add current directory to path for imports
-        current_dir = str(Path(__file__).resolve().parent)
-        if current_dir not in sys.path:
-            sys.path.insert(0, current_dir)
-        
-        # In Docker, we are mapped to /app
-        if "/app" not in sys.path:
-            sys.path.insert(0, "/app")
-        
-        # Try to import the app - first try direct import, then package import
-        try:
-            from api.server import app
-            print("✓ Using direct import (api.server)")
-        except ImportError:
-            try:
-                from sonora.api.server import app
-                print("✓ Using package import (sonora.api.server)")
-            except ImportError:
-                # Last resort: try uvicorn with module string
-                print("⚠ Using uvicorn module string import")
-                uvicorn.run(
-                    "api.server:app",
-                    host="0.0.0.0",
-                    port=8000,
-                    reload=False,
-                    log_level="info"
-                )
-                return
+        sys.path.insert(0, os.getcwd())
         
         uvicorn.run(
-            "run_server:app" if not is_docker else "api.server:app",
+            "api.server:app",
             host="0.0.0.0",
             port=8000,
             reload=False,
             log_level="info",
-            workers=2, # Multi-worker for responsiveness
+            workers=1, # Single worker for stability in cloud
             timeout_keep_alive=1200
         )
     except ImportError as e:
