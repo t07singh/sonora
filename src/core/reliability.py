@@ -19,9 +19,14 @@ logger = logging.getLogger("sonora.core.reliability")
 # Initialize Redis client for distributed locking
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis-cache:6379/0")
 try:
-    r_client = redis.from_url(REDIS_URL)
+    if REDIS_URL:
+        r_client = redis.from_url(REDIS_URL, socket_connect_timeout=1)
+        r_client.ping() # Verify connection
+        logger.info(f"Distributed Lock: Connected to Redis at {REDIS_URL}")
+    else:
+        r_client = None
 except Exception as e:
-    logger.warning(f"Distributed Lock: Redis unavailable, falling back to local safety. {e}")
+    logger.warning(f"Distributed Lock: Redis unavailable at {REDIS_URL}, falling back to local safety. Error: {e}")
     r_client = None
 
 class HardwareLock:
