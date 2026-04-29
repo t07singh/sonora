@@ -2,15 +2,22 @@
 # Startup script for Sonora Unified (API + UI)
 
 echo "🎬 Starting Sonora Swarm Unified Services..."
+export SHARED_PATH="/home/user/app/shared_data"
+mkdir -p $SHARED_PATH
 
 # 0. Check and download neural weights (Cloud-side download/Volume Persistence)
 echo "📥 Checking for model weights in /app/models..."
 # bundle_weights.py will populate /app/models which is shared across services
 python scripts/bundle_weights.py
 
-# 1. Start the FastAPI backend in the background
+# 1. Start the Segmenter service (on port 8004)
+echo "🛰️ Launching Sonora Segmenter Service on port 8004..."
+export SEGMENTER_URL="http://127.0.0.1:8004"
+python src/services/segmenter/main.py &
+SEGMENTER_PID=$!
+
+# 2. Start the FastAPI backend in the background (on port 8000)
 echo "🚀 Launching FastAPI Backend on port 8000..."
-# We keep the backend process attached so we can see logs in the terminal
 python run_server.py &
 BACKEND_PID=$!
 
