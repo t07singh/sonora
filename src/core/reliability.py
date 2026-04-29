@@ -65,8 +65,9 @@ class HardwareLock:
                 await asyncio.sleep(poll_interval)
             logger.info(f"🛰️ HardwareLock ACQUIRED by {model_name}.")
         else:
-            await cls._get_local_lock().acquire()
-            logger.info(f"🔒 Local HardwareLock ACQUIRED by {model_name}.")
+            # Bypass local lock for cloud debugging
+            logger.warning(f"🔓 [BYPASS] Local HardwareLock bypassed for {model_name}.")
+            return
 
     @classmethod
     def release(cls):
