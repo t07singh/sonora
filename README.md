@@ -1,3 +1,11 @@
+---
+title: Sonora Studio
+emoji: 🎬
+colorFrom: blue
+colorTo: purple
+sdk: docker
+pinned: false
+---
 # Sonora/Auralis - Anime-First AI Dubbing System
 
 A modular AI dubbing pipeline designed specifically for anime content, featuring high-quality speech synthesis, intelligent translation, and non-verbal preservation.
@@ -301,4 +309,5 @@ For questions, issues, or contributions:
 ---
 
 **Sonora/Auralis** - Bringing anime to life with AI-powered dubbing 🎌✨
+
 
