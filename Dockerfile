@@ -17,7 +17,7 @@ COPY requirements_core.txt .
 RUN pip install --upgrade pip
 
 # Pre-install heavy AI dependencies for better layer caching
-RUN pip install --no-cache-dir "torch>=2.0.0" "torchaudio>=2.0.0" "numpy<2.0.0" pandas transformers accelerate huggingface_hub
+RUN pip install --no-cache-dir "torch>=2.1.0" "torchaudio>=2.1.0" "numpy<2.0.0" pandas transformers accelerate huggingface_hub
 
 # Install remaining dependencies including demucs and faster-whisper
 RUN pip install --no-cache-dir --default-timeout=1000 -r requirements_core.txt

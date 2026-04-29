@@ -37,5 +37,5 @@ demucs>=4.0.0
 psutil>=5.9.0
 accelerate
 transformers
-torch
-torchaudio
+torch>=2.1.0
+torchaudio>=2.1.0
