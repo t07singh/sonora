@@ -187,10 +187,8 @@ async def broadcast_status(job_id: str, msg: str, progress: float = 0.0):
 async def background_segmentation(job_id: str, req: SegmentRequest):
     """Run segmentation in the background and update job state."""
     try:
-        # Update job status
-        segmentation_jobs[job_id]["status"] = "Processing"
-        segmentation_jobs[job_id]["progress"] = 0.0
-        save_jobs()
+        # Update job status immediately
+        await broadcast_status(job_id, "Processing: Initializing Neural Engine...", 0.01)
 
         async def status_cb(msg: str):
             # Parse progress from status messages
@@ -225,7 +223,9 @@ async def background_segmentation(job_id: str, req: SegmentRequest):
         )
 
         # Acquire hardware lock (GPU)
+        logger.info(f"Job {job_id} requesting hardware lock...")
         async with HardwareLock.locked_async("Segmenter", priority=2):
+            logger.info(f"Job {job_id} acquired hardware lock.")
             result = await segmenter.segment_video(
                 video_path=req.video_path,
                 language=req.language,
