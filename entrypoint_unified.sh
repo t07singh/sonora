@@ -3,7 +3,9 @@
 
 echo "🎬 Starting Sonora Swarm Unified Services..."
 export SHARED_PATH="/home/user/app/shared_data"
-mkdir -p $SHARED_PATH
+export SONORA_DATA_DIR=$SHARED_PATH
+export MODELS_DIR="/home/user/app/models"
+mkdir -p $SHARED_PATH $MODELS_DIR
 
 # 0. Check and download neural weights (Cloud-side download/Volume Persistence)
 echo "📥 Checking for model weights in /app/models..."

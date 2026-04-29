@@ -242,8 +242,8 @@ def render_segmentation_hub():
             with st.status("🕵️ Neural Swarm: Extracting character dialogue...", expanded=True) as status:
                 try:
                     status.write("🚀 Initiating high-load segmentation proxy...")
-                    # We pass the filename; the backend expects the file to be available in shared volume
-                    payload = {"video_path": os.path.basename(st.session_state.current_file_path)}
+                    # We pass the absolute path to ensure the segmenter can find it in the shared volume
+                    payload = {"video_path": st.session_state.current_file_path}
                     
                     # Call the Proxy endpoint
                     r = requests.post(ENDPOINTS["segment"], json=payload, headers=HEADERS, timeout=60)
