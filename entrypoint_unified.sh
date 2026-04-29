@@ -26,4 +26,4 @@ fi
 
 # 3. Start the Streamlit frontend in the foreground
 echo "🎙️ Launching Streamlit UI on port 7860 (Hugging Face Spaces requirement)..."
-streamlit run unified_demo.py --server.port=7860 --server.address=0.0.0.0
+streamlit run unified_demo.py --server.port=7860 --server.address=0.0.0.0 --server.enableCORS=false --server.enableXsrfProtection=false --server.maxUploadSize=1024
