@@ -19,6 +19,8 @@ RUN pip install --upgrade pip
 # Pre-install heavy AI dependencies for better layer caching
 RUN pip install --no-cache-dir "torch==2.2.1" "torchaudio==2.2.1" "numpy<2.0.0" pandas transformers accelerate huggingface_hub
 
+# Sonora Studio Unified Container - Cloud Edition
+# Build Timestamp: 2026-04-30-03-57-00
 # Install remaining dependencies including demucs and faster-whisper
 RUN pip install --no-cache-dir --default-timeout=1000 -r requirements_core.txt
 
