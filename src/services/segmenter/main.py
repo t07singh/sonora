@@ -334,6 +334,31 @@ async def debug_jobs():
     }
 
 
+@app.get("/job/{job_id}", response_model=SegmentationResponse)
+async def get_job_status(job_id: str):
+    """Get the status and results of a segmentation job."""
+    if job_id not in segmentation_jobs:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    job = segmentation_jobs[job_id]
+    
+    # Return response matching the schema
+    return SegmentationResponse(
+        segments=job.get("result", {}).get("segments", []) if job.get("result") else [],
+        duration=job.get("result", {}).get("duration", 0) if job.get("result") else 0,
+        language=job.get("language", "ja"),
+        num_speakers=job.get("result", {}).get("num_speakers", 0) if job.get("result") else 0,
+        device=job.get("result", {}).get("device", "cpu") if job.get("result") else "pending",
+        mode=job.get("mode", "fast"),
+        aligner=job.get("result", {}).get("aligner", "qwen3") if job.get("result") else "qwen3",
+        processing_time=job.get("result", {}).get("processing_time", 0) if job.get("result") else 0,
+        job_id=job_id,
+        status=job.get("status", "Queued"),
+        progress=job.get("progress", 0.0),
+        error=job.get("error")
+    )
+
+
 @app.post("/segment", response_model=SegmentationResponse)
 async def segment_video(req: SegmentRequest, background_tasks: BackgroundTasks):
     """
