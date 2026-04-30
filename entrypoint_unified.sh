@@ -23,7 +23,7 @@ curl -s http://127.0.0.1:8004/health || echo "⚠️ Segmenter health check fail
 
 # 2. Start the FastAPI backend in the background (on port 8000)
 echo "🚀 Launching FastAPI Backend on port 8000..."
-uvicorn run_server:app --host 0.0.0.0 --port 8000 --log-level info &
+python run_server.py &
 BACKEND_PID=$!
 
 # 2. Wait a few seconds for the backend to initialize
