@@ -23,7 +23,7 @@ from sonora.core.orchestrator import SonoraOrchestrator, group_words_by_pause, c
 from sonora.utils.voice_registry import save_character_voice
 from api.auth import SonoraAuthMiddleware
 # Segmenter service URL (new dedicated segmentation microservice)
-SEGMENTER_URL = os.getenv("SEGMENTER_URL", "http://sonora-segmenter:8004")
+SEGMENTER_URL = os.getenv("SEGMENTER_URL", "http://127.0.0.1:8004")
 
 app = FastAPI(title="Sonora AI Studio API")
 
