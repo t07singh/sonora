@@ -233,7 +233,7 @@ async def background_segmentation(job_id: str, video_path: str, language: str = 
 
         # Now poll the segmenter service for completion
         poll_url = f"{SEGMENTER_URL}/job/{segmenter_job_id}"
-        max_polls = 120  # 10 minutes at 5s intervals
+        max_polls = 540  # 45 minutes at 5s intervals (for CPU cloud)
         poll_count = 0
 
         while poll_count < max_polls:
@@ -289,8 +289,7 @@ async def background_segmentation(job_id: str, video_path: str, language: str = 
                 elif status == "Error":
                     error_msg = poll_data.get("error", "Unknown segmentation error")
                     raise Exception(error_msg)
-
-        raise Exception("Segmentation timed out after 10 minutes")
+        raise Exception("Segmentation timed out after 45 minutes")
 
     except Exception as e:
         import traceback
