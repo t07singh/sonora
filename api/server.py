@@ -193,6 +193,11 @@ async def background_segmentation(job_id: str, video_path: str, language: str = 
     import httpx
 
     try:
+        # Immediately mark as Processing so the UI poller sees the transition
+        analysis_jobs[job_id]["status"] = "Processing"
+        analysis_jobs[job_id]["progress"] = 0.0
+        save_jobs()
+
         await manager.broadcast({
             "type": "status",
             "msg": "Initiating Neural Segmentation (Sonora Segmenter Service)...",
@@ -211,14 +216,20 @@ async def background_segmentation(job_id: str, video_path: str, language: str = 
             "num_speakers": num_speakers
         }
 
-        async with httpx.AsyncClient(timeout=600.0) as client:
-            response = await client.post(segment_url, json=payload)
+        try:
+            async with httpx.AsyncClient(timeout=600.0) as client:
+                response = await client.post(segment_url, json=payload)
 
-            if response.status_code != 200:
-                raise Exception(f"Segmenter service returned error {response.status_code}: {response.text}")
+                if response.status_code != 200:
+                    raise Exception(f"Segmenter service returned error {response.status_code}: {response.text}")
 
-            data = response.json()
-            segmenter_job_id = data.get("job_id")
+                data = response.json()
+                segmenter_job_id = data.get("job_id")
+        except httpx.ConnectError:
+            raise Exception(
+                f"Segmenter service not reachable at {SEGMENTER_URL}. "
+                f"Start it with: py -m uvicorn src.services.segmenter.main:app --port 8004"
+            )
 
         # Now poll the segmenter service for completion
         poll_url = f"{SEGMENTER_URL}/job/{segmenter_job_id}"
@@ -238,8 +249,11 @@ async def background_segmentation(job_id: str, video_path: str, language: str = 
                 status = poll_data.get("status", "")
                 progress = poll_data.get("progress", 0)
 
-                # Broadcast progress
-                if status == "Processing":
+                # Broadcast progress AND persist to analysis_jobs for REST pollers
+                if status not in ["Complete", "Error", ""]:
+                    analysis_jobs[job_id]["status"] = status
+                    analysis_jobs[job_id]["progress"] = progress
+                    save_jobs()
                     await manager.broadcast({
                         "type": "status",
                         "msg": f"Segmenting: {status} ({progress:.0%})",
@@ -295,9 +309,17 @@ async def pipeline_segment(background_tasks: BackgroundTasks, req: SegmentReques
     """
     job_id = str(uuid.uuid4())
 
+    # Resolve video path: try as-is, then fallback to SHARED_PATH + basename
+    video_path = req.video_path
+    if not os.path.exists(video_path):
+        candidate = os.path.join(SHARED_PATH, os.path.basename(video_path))
+        if os.path.exists(candidate):
+            video_path = candidate
+            logger.info(f"Path resolved via fallback: {video_path}")
+
     analysis_jobs[job_id] = {
         "status": "Queued",
-        "video_path": req.video_path,
+        "video_path": video_path,
         "project_id": req.project_id,
         "language": req.language,
         "mode": req.mode,
@@ -307,7 +329,7 @@ async def pipeline_segment(background_tasks: BackgroundTasks, req: SegmentReques
     save_jobs()
 
     background_tasks.add_task(
-        background_segmentation, job_id, req.video_path,
+        background_segmentation, job_id, video_path,
         req.language, req.mode, req.cut_clips, req.isolate_vocals, req.num_speakers,
         **{"aligner": req.aligner}
     )

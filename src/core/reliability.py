@@ -65,9 +65,10 @@ class HardwareLock:
                 await asyncio.sleep(poll_interval)
             logger.info(f"🛰️ HardwareLock ACQUIRED by {model_name}.")
         else:
-            # Bypass local lock for cloud debugging
-            logger.warning(f"🔓 [BYPASS] Local HardwareLock bypassed for {model_name}.")
-            return
+            # Use local asyncio.Lock for single-process GPU contention protection
+            lock = cls._get_local_lock()
+            await lock.acquire()
+            logger.info(f"🔒 [LOCAL] Local HardwareLock acquired for {model_name}.")
 
     @classmethod
     def release(cls):

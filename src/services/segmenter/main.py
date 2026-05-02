@@ -49,8 +49,8 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3")
 DEFAULT_MODE = os.getenv("SEGMENTER_MODE", "fast")  # "fast" or "precise"
 DEFAULT_ALIGNER = os.getenv("ALIGNER_TYPE", "qwen3")  # "qwen3" or "wav2vec2"
-SHARED_PATH = os.getenv("SHARED_PATH", "/tmp/sonora")
-SONORA_DATA_DIR = os.getenv("SONORA_DATA_DIR", str(Path.home() / "sonora" / "data"))
+SHARED_PATH = os.path.abspath(os.getenv("SHARED_PATH", os.path.join(os.path.dirname(__file__), "..", "..", "..", "sonora", "data")))
+SONORA_DATA_DIR = os.path.abspath(os.getenv("SONORA_DATA_DIR", SHARED_PATH))
 
 # ─────────────────────────────────────────────────────────────
 # FastAPI App
@@ -453,13 +453,7 @@ async def segment_video_sync(req: QuickSegmentRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/job/{job_id}")
-async def get_job_status(job_id: str):
-    """Get the status and result of a segmentation job."""
-    if job_id not in segmentation_jobs:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
-    return segmentation_jobs[job_id]
 
 
 @app.get("/jobs")
