@@ -243,6 +243,7 @@ async def background_segmentation(job_id: str, video_path: str, language: str = 
             async with httpx.AsyncClient(timeout=30.0) as client:
                 poll_response = await client.get(poll_url)
                 if poll_response.status_code != 200:
+                    logger.warning(f"Polling segmenter failed: {poll_response.status_code} {poll_response.text}")
                     continue
 
                 poll_data = poll_response.json()

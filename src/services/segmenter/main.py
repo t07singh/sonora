@@ -394,9 +394,9 @@ async def segment_video(req: SegmentRequest, background_tasks: BackgroundTasks):
     }
     save_jobs()
 
-    # Launch task immediately in the event loop (bypass background_tasks queue)
-    logger.info(f"🚀 [TASK_LAUNCH] Job {job_id} launching immediately...")
-    asyncio.create_task(background_segmentation(job_id, req))
+    # Add to background tasks
+    logger.info(f"🚀 [TASK_LAUNCH] Job {job_id} launching via BackgroundTasks...")
+    background_tasks.add_task(background_segmentation, job_id, req)
 
     # Return immediate response with job_id
     return SegmentationResponse(
