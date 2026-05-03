@@ -262,8 +262,83 @@ class WhisperTranscriber:
                    vad_filter: bool = True) -> Dict[str, Any]:
         """
         Transcribe audio file with timestamps.
+        Offloads to Groq API if GROQ_API_KEY is present.
         Returns dict with segments and words.
         """
+        groq_key = os.getenv("GROQ_API_KEY")
+        if groq_key:
+            logger.info(f"☁️ [CLOUD OFFLOAD] Offloading transcription to Groq API...")
+            try:
+                import groq
+                client = groq.Groq(api_key=groq_key)
+                
+                # Check file size (Groq limit is 25MB)
+                file_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
+                if file_size_mb > 24.5:
+                    logger.warning(f"File size ({file_size_mb:.2f}MB) exceeds Groq 25MB limit. Falling back to local CPU model.")
+                    raise Exception("File too large for Groq API")
+                
+                with open(audio_path, "rb") as audio_file:
+                    response = client.audio.transcriptions.create(
+                        file=(os.path.basename(audio_path), audio_file),
+                        model="whisper-large-v3",
+                        prompt="Transcribe this Japanese audio. Pay attention to anime/dramatic nuances.",
+                        response_format="verbose_json",
+                        timestamp_granularities=["word"] if word_timestamps else ["segment"]
+                    )
+                
+                # Parse Groq response
+                segments = []
+                all_words = []
+                
+                # Groq segments are either objects or dicts depending on SDK version
+                raw_segments = getattr(response, 'segments', [])
+                for s in raw_segments:
+                    seg_dict = s if isinstance(s, dict) else s.dict() if hasattr(s, 'dict') else s
+                    
+                    st = seg_dict.get("start", 0) if isinstance(seg_dict, dict) else getattr(seg_dict, "start", 0)
+                    en = seg_dict.get("end", 0) if isinstance(seg_dict, dict) else getattr(seg_dict, "end", 0)
+                    txt = (seg_dict.get("text", "") if isinstance(seg_dict, dict) else getattr(seg_dict, "text", "")).strip()
+                    
+                    parsed_seg = {
+                        "start": st,
+                        "end": en,
+                        "text": txt,
+                        "words": []
+                    }
+                    
+                    # Parse words
+                    words_list = seg_dict.get('words', []) if isinstance(seg_dict, dict) else getattr(seg_dict, 'words', [])
+                    for w in words_list:
+                        w_dict = w if isinstance(w, dict) else w.dict() if hasattr(w, 'dict') else w.__dict__
+                        word_obj = {
+                            "word": w_dict.get("word", ""),
+                            "start": w_dict.get("start", 0),
+                            "end": w_dict.get("end", 0),
+                            "probability": w_dict.get("probability", 1.0)
+                        }
+                        parsed_seg["words"].append(word_obj)
+                        all_words.append(word_obj)
+                        
+                    segments.append(parsed_seg)
+                    
+                result = {
+                    "segments": segments,
+                    "words": all_words,
+                    "language": getattr(response, "language", language),
+                    "language_probability": 1.0,
+                    "duration": segments[-1]["end"] if segments else 0.0
+                }
+                
+                logger.info(f"✅ [SUCCESS] Groq Transcription complete: {len(segments)} segments, {len(all_words)} words.")
+                return result
+                
+            except Exception as e:
+                logger.error(f"❌ Groq Transcription failed: {e}. Falling back to local model.")
+                # Fallback to local
+                pass
+
+        # ---- LOCAL FALLBACK / NO API KEY ----
         self._load_model()
 
         segments_iter, info = self.model.transcribe(
