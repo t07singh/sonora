@@ -1367,15 +1367,21 @@ class VideoClipCutter:
         return False
 
     def cut_all_segments(self, video_path: str,
-                         segments: List[Segment]) -> List[Segment]:
+                         segments: List[Segment],
+                         skip_thumbnails: bool = False) -> List[Segment]:
         """
         Cut all segments from the video.
         Updates each segment's clip_path in-place.
         """
-        for seg in segments:
+        for i, seg in enumerate(segments):
+            # Log progress every 5 segments
+            if i % 5 == 0:
+                logger.info(f"Cutting segments: {i}/{len(segments)}...")
+                
             clip_path = self.cut_segment(video_path, seg.id, seg.start, seg.end)
             seg.clip_path = clip_path
-            if clip_path:
+            
+            if clip_path and not skip_thumbnails:
                 # Extract thumbnail from start of segment
                 thumb_path = str(self.output_dir / f"thumb_{seg.id}.jpg")
                 seg.thumbnail_path = extract_thumbnail(
@@ -1624,7 +1630,7 @@ class VideoSegmenter:
             await self.update_status(f"Cutting {len(segments)} video clips...")
             cutter = VideoClipCutter(clips_dir)
             segments = await asyncio.to_thread(
-                cutter.cut_all_segments, video_path, segments
+                cutter.cut_all_segments, video_path, segments, turbo_mode
             )
 
         # Count unique speakers
