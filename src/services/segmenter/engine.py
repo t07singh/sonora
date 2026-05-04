@@ -1519,41 +1519,69 @@ class VideoSegmenter:
 
         # Step 1: Extract audio
         await self.update_status("Extracting audio from video...")
+        step_start = time.time()
         audio_path = await asyncio.to_thread(
             extract_audio_from_video, video_path
         )
+        logger.info(f"⏱️ Audio extraction took {time.time() - step_start:.1f}s")
 
-        # Step 1b: Vocal isolation (optional but recommended for anime)
+        # Detect if we're running on CPU (no GPU available)
+        is_cpu_mode = True
+        try:
+            import torch
+            is_cpu_mode = not torch.cuda.is_available()
+        except ImportError:
+            is_cpu_mode = True
+
+        if is_cpu_mode:
+            logger.info("⚡ [CPU-TURBO] Running in CPU-optimized mode: skipping Demucs & Pyannote")
+
+        # Step 1b: Vocal isolation (SKIP on CPU — too slow, 10-15 min)
         vocals_path = audio_path
-        if isolate_vocals:
+        if isolate_vocals and not is_cpu_mode:
             await self.update_status("Isolating vocals with Demucs...")
+            step_start = time.time()
             try:
                 vocals_path = await asyncio.to_thread(
                     self._isolate_vocals, audio_path
                 )
             except Exception as e:
                 logger.warning(f"Vocal isolation failed: {e}. Using raw audio.")
+            logger.info(f"⏱️ Vocal isolation took {time.time() - step_start:.1f}s")
+        elif is_cpu_mode and isolate_vocals:
+            await self.update_status("⚡ Skipping Demucs vocal isolation (CPU-turbo mode)...")
 
         # Step 2: Voice Activity Detection
         await self.update_status("Detecting speech regions (Silero VAD)...")
+        step_start = time.time()
         vad = self._get_vad()
         speech_regions = await asyncio.to_thread(
             vad.detect_speech_regions, vocals_path
         )
+        logger.info(f"⏱️ VAD took {time.time() - step_start:.1f}s")
 
-        # Step 3: Transcription with word timestamps
+        # Step 3: Transcription with word timestamps (offloaded to Groq if key present)
         await self.update_status("Transcribing speech (Whisper ASR)...")
+        step_start = time.time()
         transcriber = self._get_transcriber()
         transcription = await asyncio.to_thread(
             transcriber.transcribe, vocals_path, language, True
         )
+        logger.info(f"⏱️ Transcription took {time.time() - step_start:.1f}s")
 
-        # Step 4: Speaker Diarization
-        await self.update_status("Identifying speakers (Pyannote)...")
-        diarizer = self._get_diarizer()
-        speaker_turns = await asyncio.to_thread(
-            diarizer.diarize, vocals_path
-        )
+        # Step 4: Speaker Diarization (SKIP on CPU — too slow, 5-10 min)
+        if not is_cpu_mode:
+            await self.update_status("Identifying speakers (Pyannote)...")
+            step_start = time.time()
+            diarizer = self._get_diarizer()
+            speaker_turns = await asyncio.to_thread(
+                diarizer.diarize, vocals_path
+            )
+            logger.info(f"⏱️ Diarization took {time.time() - step_start:.1f}s")
+        else:
+            await self.update_status("⚡ Skipping Pyannote diarization (CPU-turbo mode)...")
+            # Assign all speech to Speaker_1 — user can rename in the UI
+            speaker_turns = [{"start": 0.0, "end": 99999.0, "speaker": "SPEAKER_00"}]
 
         # Step 5: Merge words with speaker labels
         await self.update_status("Merging transcription with speaker labels...")
@@ -1561,8 +1589,8 @@ class VideoSegmenter:
             transcription["words"], speaker_turns
         )
 
-        # Step 6: Optional forced alignment (precise mode)
-        if self.mode == "precise" and transcription["words"]:
+        # Step 6: Optional forced alignment (precise mode) — SKIP on CPU
+        if self.mode == "precise" and transcription["words"] and not is_cpu_mode:
             aligner_name = "Qwen3-ForcedAligner" if self.aligner_type == "qwen3" else "wav2vec2"
             await self.update_status(f"Running forced alignment ({aligner_name})...")
             try:
