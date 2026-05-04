@@ -65,6 +65,12 @@ class HardwareLock:
                 await asyncio.sleep(poll_interval)
             logger.info(f"🛰️ HardwareLock ACQUIRED by {model_name}.")
         else:
+            # Check if we actually need a lock (only for GPU protection)
+            device = get_device()
+            if device == "cpu":
+                logger.info(f"⚡ [CPU-SKIP] Skipping HardwareLock for {model_name} (CPU mode).")
+                return
+
             # Use local asyncio.Lock for single-process GPU contention protection
             lock = cls._get_local_lock()
             await lock.acquire()
@@ -76,6 +82,10 @@ class HardwareLock:
             r_client.delete(cls._lock_key)
             logger.info(f"🔓 [REASONING] Distributed HardwareLock RELEASED.")
         else:
+            # Skip if we are on CPU (consistent with acquire)
+            if get_device() == "cpu":
+                return
+
             try:
                 if cls._local_lock is not None:
                     cls._local_lock.release()

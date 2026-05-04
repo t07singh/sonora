@@ -195,9 +195,11 @@ async def background_segmentation(job_id: str, req: SegmentRequest):
             progress_map = {
                 "Extracting": 0.05,
                 "Isolating": 0.15,
+                "Skipping Demucs": 0.20,
                 "Detecting": 0.25,
                 "Transcribing": 0.40,
                 "Identifying": 0.60,
+                "Skipping Pyannote": 0.65,
                 "Merging": 0.70,
                 "Running forced": 0.75,
                 "Grouping": 0.80,

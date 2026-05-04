@@ -1525,7 +1525,10 @@ class VideoSegmenter:
         )
         logger.info(f"⏱️ Audio extraction took {time.time() - step_start:.1f}s")
 
-        # Detect if we're running on CPU (no GPU available)
+        # Environment detection
+        cloud_offload = os.getenv("CLOUD_OFFLOAD", "false").lower() == "true"
+        groq_key = os.getenv("GROQ_API_KEY")
+        
         is_cpu_mode = True
         try:
             import torch
@@ -1533,12 +1536,17 @@ class VideoSegmenter:
         except ImportError:
             is_cpu_mode = True
 
-        if is_cpu_mode:
-            logger.info("⚡ [CPU-TURBO] Running in CPU-optimized mode: skipping Demucs & Pyannote")
+        # Turbo mode: either forced by cloud_offload or auto-detected on CPU
+        turbo_mode = cloud_offload or is_cpu_mode
+        
+        logger.info(f"🧬 [PIPELINE_CONFIG] CPU_Mode: {is_cpu_mode}, Cloud_Offload: {cloud_offload}, Groq_Key: {'Set' if groq_key else 'Missing'}")
+        
+        if turbo_mode:
+            logger.info(f"⚡ [TURBO_ACTIVE] Bypassing heavy neural steps (Reason: {'Cloud Offload' if cloud_offload else 'CPU Instance'})")
 
-        # Step 1b: Vocal isolation (SKIP on CPU — too slow, 10-15 min)
+        # Step 1b: Vocal isolation (SKIP in Turbo mode)
         vocals_path = audio_path
-        if isolate_vocals and not is_cpu_mode:
+        if isolate_vocals and not turbo_mode:
             await self.update_status("Isolating vocals with Demucs...")
             step_start = time.time()
             try:
@@ -1548,8 +1556,8 @@ class VideoSegmenter:
             except Exception as e:
                 logger.warning(f"Vocal isolation failed: {e}. Using raw audio.")
             logger.info(f"⏱️ Vocal isolation took {time.time() - step_start:.1f}s")
-        elif is_cpu_mode and isolate_vocals:
-            await self.update_status("⚡ Skipping Demucs vocal isolation (CPU-turbo mode)...")
+        elif turbo_mode and isolate_vocals:
+            await self.update_status("⚡ Skipping Demucs (Turbo mode)...")
 
         # Step 2: Voice Activity Detection
         await self.update_status("Detecting speech regions (Silero VAD)...")
@@ -1569,8 +1577,8 @@ class VideoSegmenter:
         )
         logger.info(f"⏱️ Transcription took {time.time() - step_start:.1f}s")
 
-        # Step 4: Speaker Diarization (SKIP on CPU — too slow, 5-10 min)
-        if not is_cpu_mode:
+        # Step 4: Speaker Diarization (SKIP in Turbo mode)
+        if not turbo_mode:
             await self.update_status("Identifying speakers (Pyannote)...")
             step_start = time.time()
             diarizer = self._get_diarizer()
@@ -1579,7 +1587,7 @@ class VideoSegmenter:
             )
             logger.info(f"⏱️ Diarization took {time.time() - step_start:.1f}s")
         else:
-            await self.update_status("⚡ Skipping Pyannote diarization (CPU-turbo mode)...")
+            await self.update_status("⚡ Skipping Pyannote (Turbo mode)...")
             # Assign all speech to Speaker_1 — user can rename in the UI
             speaker_turns = [{"start": 0.0, "end": 99999.0, "speaker": "SPEAKER_00"}]
 
@@ -1589,8 +1597,8 @@ class VideoSegmenter:
             transcription["words"], speaker_turns
         )
 
-        # Step 6: Optional forced alignment (precise mode) — SKIP on CPU
-        if self.mode == "precise" and transcription["words"] and not is_cpu_mode:
+        # Step 6: Optional forced alignment (precise mode) — SKIP in Turbo mode
+        if self.mode == "precise" and transcription["words"] and not turbo_mode:
             aligner_name = "Qwen3-ForcedAligner" if self.aligner_type == "qwen3" else "wav2vec2"
             await self.update_status(f"Running forced alignment ({aligner_name})...")
             try:
