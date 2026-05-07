@@ -79,6 +79,13 @@ async def process_audio(payload: dict):
                 max_retries = 5
                 for attempt in range(max_retries):
                     try:
+                        if attempt == 0:
+                            # Check file size (Groq limit is 25MB)
+                            file_size_mb = os.path.getsize(input_path) / (1024 * 1024)
+                            if file_size_mb > 24.5:
+                                logger.info(f"📦 [LARGE_FILE] File size ({file_size_mb:.2f}MB) exceeds Groq limit. Using chunked transcription...")
+                                return await transcribe_with_groq_chunked(input_path, client)
+
                         with open(input_path, "rb") as audio_file:
                             response = await client.audio.transcriptions.create(
                                 file=(os.path.basename(input_path), audio_file),
@@ -89,15 +96,17 @@ async def process_audio(payload: dict):
                             )
                         
                         # Process Groq verbose JSON response
-                        segments = getattr(response, 'segments', [])
+                        raw_segments = getattr(response, 'segments', [])
                         
                         processed_segments = []
                         full_text = []
                         
-                        for s in segments:
-                            # Groq verbose json returns dicts or objects
+                        for s in raw_segments:
                             seg_dict = s if isinstance(s, dict) else s.dict() if hasattr(s, 'dict') else s
-                            # In modern Groq sdk, it is usually a dict via json
+                            
+                            st = seg_dict.get("start", 0) if isinstance(seg_dict, dict) else getattr(seg_dict, "start", 0)
+                            en = seg_dict.get("end", 0) if isinstance(seg_dict, dict) else getattr(seg_dict, "end", 0)
+                            txt = (seg_dict.get("text", "") if isinstance(seg_dict, dict) else getattr(seg_dict, "text", "")).strip()
                             
                             words_list = seg_dict.get('words', []) if isinstance(seg_dict, dict) else getattr(seg_dict, 'words', [])
                             words_formatted = []
@@ -108,10 +117,6 @@ async def process_audio(payload: dict):
                                     "start": w_dict.get("start", 0),
                                     "end": w_dict.get("end", 0)
                                 })
-                            
-                            st = seg_dict.get("start", 0) if isinstance(seg_dict, dict) else getattr(seg_dict, "start", 0)
-                            en = seg_dict.get("end", 0) if isinstance(seg_dict, dict) else getattr(seg_dict, "end", 0)
-                            txt = (seg_dict.get("text", "") if isinstance(seg_dict, dict) else getattr(seg_dict, "text", "")).strip()
                             
                             processed_segments.append({
                                 "start": st,
@@ -207,6 +212,78 @@ async def segment_video(payload: dict):
         except Exception as e:
             logger.error(f"❌ Segmentation error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
+
+async def transcribe_with_groq_chunked(audio_path: str, client: object) -> dict:
+    """Splits large audio into chunks and transcribes them via Groq asynchronously."""
+    import subprocess
+    import tempfile
+    
+    chunk_length_s = 600  # 10 minutes per chunk
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Split audio into chunks using ffmpeg
+        output_pattern = os.path.join(tmpdir, "chunk_%03d.mp3")
+        split_cmd = [
+            "ffmpeg", "-y", "-i", audio_path,
+            "-f", "segment", "-segment_time", str(chunk_length_s),
+            "-c", "copy", output_pattern
+        ]
+        await asyncio.to_thread(subprocess.run, split_cmd, capture_output=True, check=True)
+        
+        chunk_files = sorted([os.path.join(tmpdir, f) for f in os.listdir(tmpdir) if f.startswith("chunk_")])
+        logger.info(f"📦 [CHUNKING] Split into {len(chunk_files)} chunks.")
+        
+        all_segments = []
+        all_text = []
+        
+        for i, chunk_path in enumerate(chunk_files):
+            time_offset = i * chunk_length_s
+            logger.info(f"🛰️ [CHUNK_{i}] Transcribing at offset {time_offset}s...")
+            
+            with open(chunk_path, "rb") as audio_file:
+                response = await client.audio.transcriptions.create(
+                    file=(os.path.basename(chunk_path), audio_file),
+                    model="whisper-large-v3",
+                    prompt="Transcribe this Japanese audio accurately.",
+                    response_format="verbose_json",
+                    timestamp_granularities=["word"]
+                )
+            
+            # Parse segments with offset
+            raw_segments = getattr(response, 'segments', [])
+            for s in raw_segments:
+                seg_dict = s if isinstance(s, dict) else s.dict() if hasattr(s, 'dict') else s
+                
+                st = (seg_dict.get("start", 0) if isinstance(seg_dict, dict) else getattr(seg_dict, "start", 0)) + time_offset
+                en = (seg_dict.get("end", 0) if isinstance(seg_dict, dict) else getattr(seg_dict, "end", 0)) + time_offset
+                txt = (seg_dict.get("text", "") if isinstance(seg_dict, dict) else getattr(seg_dict, "text", "")).strip()
+                
+                words_list = seg_dict.get('words', []) if isinstance(seg_dict, dict) else getattr(seg_dict, 'words', [])
+                words_formatted = []
+                for w in words_list:
+                    w_dict = w if isinstance(w, dict) else w.dict() if hasattr(w, 'dict') else w.__dict__
+                    words_formatted.append({
+                        "word": w_dict.get("word", ""),
+                        "start": w_dict.get("start", 0) + time_offset,
+                        "end": w_dict.get("end", 0) + time_offset
+                    })
+                
+                all_segments.append({
+                    "start": st,
+                    "end": en,
+                    "text": txt,
+                    "words": words_formatted
+                })
+                all_text.append(txt)
+        
+        return {
+            "status": "success",
+            "text": " ".join(all_text),
+            "segments": all_segments,
+            "language": "ja",
+            "device": "Cloud (Groq-Chunked)",
+            "timestamp": time.time()
+        }
 
 if __name__ == "__main__":
     import uvicorn

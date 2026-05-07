@@ -156,7 +156,16 @@ class SonoraOrchestrator:
             os.environ["CLOUD_OFFLOAD"] = "true"
 
         # Initialize Separator: Respect Cloud Offload setting
-        cloud_offload = os.getenv("CLOUD_OFFLOAD", "false").lower() == "true"
+        cloud_offload = os.environ.get("CLOUD_OFFLOAD", "false").lower() == "true"
+        
+        # --- HF SPACE AUTO-OFFLOAD ---
+        # If we are on a Hugging Face Space, force CLOUD_OFFLOAD to avoid CPU bottlenecks
+        if os.getenv("SPACE_ID") or os.getenv("SPACE_REPO_NAME"):
+            if not cloud_offload:
+                logger.info("🌤️ [HF-AUTO-DETECT] Running on Hugging Face Space. Enabling CLOUD_OFFLOAD for stability.")
+                os.environ["CLOUD_OFFLOAD"] = "true"
+                cloud_offload = True
+
         from src.services.separator.audio_separator import AudioSeparator, SeparationModel
         model_selection = SeparationModel.CLOUD_DEMUCS if cloud_offload else SeparationModel.SWARM_DEMUCS
         logger.info(f"🌊 Orchestrator: Initializing Separator with {model_selection.value} (Cloud: {cloud_offload})")
@@ -379,7 +388,7 @@ class SonoraOrchestrator:
         prompt = self._build_translate_prompt(text, target_syllables, style)
         return self.translator.translate(prompt)
 
-    async def _synthesize_single_segment(self, i: int, text: str, original_text: str, emotion: str, voice_id: str, SYNTH_URL: str) -> str:
+    async def _synthesize_single_segment(self, i: int, text: str, original_text: str, emotion: str, voice_id: str, SYNTH_URL: str, is_main: bool = True) -> str:
         """Helper for parallel synthesis of a single line."""
         # Use a sanitized take name to avoid collisions
         take_name = f"take_{int(time.time())}_{i}.wav"
@@ -414,7 +423,8 @@ class SonoraOrchestrator:
                     "text": text,
                     "voice_id": voice_id,
                     "emotion": emotion,
-                    "target_syllables": target_sylls
+                    "target_syllables": target_sylls,
+                    "is_main_character": is_main
                 }
                 r = await asyncio.to_thread(requests.post, SYNTH_URL, json=payload, timeout=60)
                 r.raise_for_status()
@@ -436,11 +446,26 @@ class SonoraOrchestrator:
         
         logger.info(f"🎙️ Orchestrator: Launching Parallel Synthesis for {len(translations)} lines...")
         
+        # Heuristic: Count character frequency to distinguish Main from Background
+        speaker_counts = {}
+        for s in segments:
+            spk = s.get('speaker', 'UNKNOWN')
+            speaker_counts[spk] = speaker_counts.get(spk, 0) + 1
+            
+        # Any speaker with > 5 segments is considered a Main Character (Primary Engine)
+        main_threshold = 5
+        main_speakers = {spk for spk, count in speaker_counts.items() if count >= main_threshold}
+        
         tasks = []
         for i, text in enumerate(translations):
             original_text = segments[i].get('original', '')
-            emotion = segments[i].get('emotion', 'neutral')
-            tasks.append(self._synthesize_single_segment(i, text, original_text, emotion, voice_id, SYNTH_URL))
+            speaker = segments[i].get('speaker', 'UNKNOWN')
+            emotion = segments[i].get('emotion', 'Neutral')
+            is_main = speaker in main_speakers
+            
+            tasks.append(self._synthesize_single_segment(
+                i, text, original_text, emotion, voice_id, SYNTH_URL, is_main=is_main
+            ))
         
         audio_takes = await asyncio.gather(*tasks)
         logger.info("✅ All Neural Takes synthesized in parallel.")
@@ -473,7 +498,18 @@ class SonoraOrchestrator:
         # 2. Visual Sync Pass (Safe Check)
         visual_master = video_path
         weights_path = "models/wav2lip/wav2lip.pth"
-        if os.path.exists(weights_path) and hasattr(self, 'sync_engine') and self.sync_engine.is_ready:
+        
+        # --- CLOUD OFFLOAD BRANCH ---
+        cloud_offload = os.environ.get("CLOUD_OFFLOAD", "false").lower() == "true"
+        if cloud_offload:
+            logger.info("🛰️ [CLOUD OFFLOAD] Routing Visual Sync to GPU Worker Space...")
+            from src.core.shadow_providers import cloud_visual_sync
+            try:
+                visual_master = await asyncio.to_thread(cloud_visual_sync, video_path, combined_voice)
+                logger.info("✅ Cloud Visual Sync complete.")
+            except Exception as e:
+                logger.warning(f"Cloud visual sync failed: {e}. Falling back to original visuals.")
+        elif os.path.exists(weights_path) and hasattr(self, 'sync_engine') and self.sync_engine.is_ready:
             try:
                 sync_output = str(get_data_dir() / "temp" / f"synced_{int(time.time())}.mp4")
                 visual_master = await self.sync_engine.sync_video(video_path, combined_voice, sync_output)

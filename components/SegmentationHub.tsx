@@ -25,6 +25,8 @@ const SegmentationHub: React.FC<{
   const [progress, setProgress] = useState(0);
   const [mode, setMode] = useState<SegmentationMode>('fast');
   const [aligner, setAligner] = useState<AlignerType>('qwen3');
+  const [turbo, setTurbo] = useState(false);
+  const [bypass, setBypass] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -70,10 +72,12 @@ const SegmentationHub: React.FC<{
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          video_path: `/tmp/sonora/${file.name}`, 
+          video_path: file.name, 
           project_id: 'auto',
           mode: mode,
           aligner: aligner,
+          turbo: turbo,
+          bypass: bypass
         })
       });
 
@@ -190,37 +194,53 @@ const SegmentationHub: React.FC<{
               </div>
             </div>
 
-            {/* Aligner Selection (only shown in precise mode) */}
-            <div>
+            {/* Performance Optimizations */}
+            <div className="md:col-span-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">
-                Forced Aligner
-                {mode === 'fast' && <span className="ml-2 text-slate-400 normal-case tracking-normal">(precise mode only)</span>}
+                Performance Optimizations
               </label>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setAligner('qwen3')}
-                  disabled={mode === 'fast'}
-                  className={`flex-1 px-4 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest border-2 transition-all ${
-                    aligner === 'qwen3' && mode === 'precise'
-                      ? 'bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400'
-                      : 'bg-transparent border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-400'
-                  } ${mode === 'fast' ? 'opacity-40 cursor-not-allowed' : ''}`}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div 
+                  onClick={() => setTurbo(!turbo)}
+                  className={`p-4 rounded-2xl border-2 cursor-pointer transition-all ${
+                    turbo 
+                      ? 'bg-amber-500/10 border-amber-500' 
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'
+                  }`}
                 >
-                  <div className="font-black">Qwen3</div>
-                  <div className="text-[8px] opacity-60 mt-0.5">SOTA, no dictionary needed</div>
-                </button>
-                <button
-                  onClick={() => setAligner('wav2vec2')}
-                  disabled={mode === 'fast'}
-                  className={`flex-1 px-4 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest border-2 transition-all ${
-                    aligner === 'wav2vec2' && mode === 'precise'
-                      ? 'bg-amber-500/10 border-amber-500 text-amber-600 dark:text-amber-400'
-                      : 'bg-transparent border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-400'
-                  } ${mode === 'fast' ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  <div className="flex justify-between items-center mb-1">
+                    <span className={`text-[10px] font-black uppercase tracking-widest ${turbo ? 'text-amber-600' : 'text-slate-500'}`}>
+                      ⚡ Turbo Mode
+                    </span>
+                    <div className={`w-8 h-4 rounded-full relative transition-colors ${turbo ? 'bg-amber-500' : 'bg-slate-300'}`}>
+                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${turbo ? 'left-4.5' : 'left-0.5'}`}></div>
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-slate-400 font-medium leading-relaxed">
+                    Bypasses heavy neural steps (Diarization & Isolation). Recommended for long videos or weak CPUs.
+                  </p>
+                </div>
+
+                <div 
+                  onClick={() => setBypass(!bypass)}
+                  className={`p-4 rounded-2xl border-2 cursor-pointer transition-all ${
+                    bypass 
+                      ? 'bg-blue-500/10 border-blue-500' 
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'
+                  }`}
                 >
-                  <div className="font-black">wav2vec2</div>
-                  <div className="text-[8px] opacity-60 mt-0.5">Legacy fallback</div>
-                </button>
+                  <div className="flex justify-between items-center mb-1">
+                    <span className={`text-[10px] font-black uppercase tracking-widest ${bypass ? 'text-blue-600' : 'text-slate-500'}`}>
+                      ⏩ Direct Bypass
+                    </span>
+                    <div className={`w-8 h-4 rounded-full relative transition-colors ${bypass ? 'bg-blue-500' : 'bg-slate-300'}`}>
+                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${bypass ? 'left-4.5' : 'left-0.5'}`}></div>
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-slate-400 font-medium leading-relaxed">
+                    Skips segmentation entirely. Creates one segment for the full video. Instant result.
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -274,10 +294,19 @@ const SegmentationHub: React.FC<{
           <div className="text-center mt-8">
             <h3 className="text-lg font-black dark:text-slate-100 uppercase tracking-widest">{isProcessing ? 'Analyzing Audio Waves...' : 'Drop Anime Episode Here'}</h3>
             <p className="text-xs text-slate-500 mt-2 max-w-sm font-medium">Character voices will be automatically detected and sliced into frame-accurate samples.</p>
-            <div className="flex items-center justify-center gap-4 mt-4">
               <span className="text-[9px] font-mono text-slate-400 px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded">
                 Mode: {mode.toUpperCase()}
               </span>
+              {turbo && (
+                <span className="text-[9px] font-mono text-amber-500 font-bold px-2 py-1 bg-amber-500/10 rounded border border-amber-500/20">
+                  ⚡ TURBO ACTIVE
+                </span>
+              )}
+              {bypass && (
+                <span className="text-[9px] font-mono text-blue-500 font-bold px-2 py-1 bg-blue-500/10 rounded border border-blue-500/20">
+                  ⏩ BYPASS ACTIVE
+                </span>
+              )}
               {mode === 'precise' && (
                 <span className="text-[9px] font-mono text-slate-400 px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded">
                   Aligner: {aligner === 'qwen3' ? 'Qwen3-ForcedAligner' : 'wav2vec2'}

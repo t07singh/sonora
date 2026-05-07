@@ -106,6 +106,18 @@ def diarize_video(video_path: str, hf_token: str = None) -> List[Dict]:
              audio_path = video_path # Assume audio
         
         logger.info(f"Starting diarization for {video_path}")
+        
+        # --- CLOUD OFFLOAD BRANCH ---
+        cloud_offload = os.getenv("CLOUD_OFFLOAD", "false").lower() == "true"
+        if cloud_offload:
+            logger.info("🛰️ [CLOUD OFFLOAD] Routing Diarization to GPU Worker Space...")
+            from src.core.shadow_providers import cloud_diarize_video
+            segments = cloud_diarize_video(audio_path)
+            if segments:
+                logger.info(f"✅ Cloud Diarization Success: {len(segments)} segments.")
+                return segments
+            logger.warning("⚠️ Cloud Diarization failed or returned no segments. Falling back to local/mock.")
+
         diarization = pipeline(audio_path)
         
         segments = []

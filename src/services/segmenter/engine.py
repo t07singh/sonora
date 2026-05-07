@@ -31,6 +31,8 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple, Any
 
+from src.services.segmenter.omnishotcut import OmniShotCutDetector
+
 logger = logging.getLogger("sonora.segmenter.engine")
 
 # ─────────────────────────────────────────────────────────────
@@ -275,8 +277,8 @@ class WhisperTranscriber:
                 # Check file size (Groq limit is 25MB)
                 file_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
                 if file_size_mb > 24.5:
-                    logger.warning(f"File size ({file_size_mb:.2f}MB) exceeds Groq 25MB limit. Falling back to local CPU model.")
-                    raise Exception("File too large for Groq API")
+                    logger.info(f"📦 [LARGE_FILE] File size ({file_size_mb:.2f}MB) exceeds Groq limit. Using chunked transcription...")
+                    return self._transcribe_with_groq_chunked(audio_path, language, word_timestamps)
                 
                 with open(audio_path, "rb") as audio_file:
                     response = client.audio.transcriptions.create(
@@ -337,6 +339,83 @@ class WhisperTranscriber:
                 logger.error(f"❌ Groq Transcription failed: {e}. Falling back to local model.")
                 # Fallback to local
                 pass
+
+    def _transcribe_with_groq_chunked(self, audio_path: str, language: str, word_timestamps: bool) -> Dict[str, Any]:
+        """Splits large audio into chunks and transcribes them via Groq."""
+        import groq
+        import subprocess
+        import tempfile
+        
+        client = groq.Groq(api_key=os.getenv("GROQ_API_KEY"))
+        chunk_length_s = 600  # 10 minutes per chunk
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Split audio into chunks using ffmpeg
+            output_pattern = os.path.join(tmpdir, "chunk_%03d.mp3")
+            split_cmd = [
+                "ffmpeg", "-y", "-i", audio_path,
+                "-f", "segment", "-segment_time", str(chunk_length_s),
+                "-c", "copy", output_pattern
+            ]
+            subprocess.run(split_cmd, capture_output=True, check=True)
+            
+            chunk_files = sorted([os.path.join(tmpdir, f) for f in os.listdir(tmpdir) if f.startswith("chunk_")])
+            logger.info(f"📦 [CHUNKING] Split into {len(chunk_files)} chunks.")
+            
+            all_segments = []
+            all_words = []
+            
+            for i, chunk_path in enumerate(chunk_files):
+                time_offset = i * chunk_length_s
+                logger.info(f"🛰️ [CHUNK_{i}] Transcribing at offset {time_offset}s...")
+                
+                with open(chunk_path, "rb") as audio_file:
+                    response = client.audio.transcriptions.create(
+                        file=(os.path.basename(chunk_path), audio_file),
+                        model="whisper-large-v3",
+                        prompt="Transcribe this Japanese audio segment accurately.",
+                        response_format="verbose_json",
+                        timestamp_granularities=["word"] if word_timestamps else ["segment"]
+                    )
+                
+                # Parse segments with offset
+                raw_segments = getattr(response, 'segments', [])
+                for s in raw_segments:
+                    seg_dict = s if isinstance(s, dict) else s.dict() if hasattr(s, 'dict') else s
+                    
+                    st = (seg_dict.get("start", 0) if isinstance(seg_dict, dict) else getattr(seg_dict, "start", 0)) + time_offset
+                    en = (seg_dict.get("end", 0) if isinstance(seg_dict, dict) else getattr(seg_dict, "end", 0)) + time_offset
+                    txt = (seg_dict.get("text", "") if isinstance(seg_dict, dict) else getattr(seg_dict, "text", "")).strip()
+                    
+                    parsed_seg = {
+                        "start": st,
+                        "end": en,
+                        "text": txt,
+                        "words": []
+                    }
+                    
+                    # Parse words with offset
+                    words_list = seg_dict.get('words', []) if isinstance(seg_dict, dict) else getattr(seg_dict, 'words', [])
+                    for w in words_list:
+                        w_dict = w if isinstance(w, dict) else w.dict() if hasattr(w, 'dict') else w.__dict__
+                        word_obj = {
+                            "word": w_dict.get("word", ""),
+                            "start": w_dict.get("start", 0) + time_offset,
+                            "end": w_dict.get("end", 0) + time_offset,
+                            "probability": w_dict.get("probability", 1.0)
+                        }
+                        parsed_seg["words"].append(word_obj)
+                        all_words.append(word_obj)
+                        
+                    all_segments.append(parsed_seg)
+            
+            return {
+                "segments": all_segments,
+                "words": all_words,
+                "language": language,
+                "language_probability": 1.0,
+                "duration": all_segments[-1]["end"] if all_segments else 0.0
+            }
 
         # ---- LOCAL FALLBACK / NO API KEY ----
         self._load_model()
@@ -1453,6 +1532,7 @@ class VideoSegmenter:
         self._aligner = None
         self._tokenizer = None
         self._cutter = None
+        self._omnishot = None
 
     async def update_status(self, msg: str):
         """Send a status update via callback."""
@@ -1493,12 +1573,20 @@ class VideoSegmenter:
             self._tokenizer = JapaneseTokenizer()
         return self._tokenizer
 
+    def _get_omnishot(self) -> OmniShotCutDetector:
+        if self._omnishot is None:
+            self._omnishot = OmniShotCutDetector(use_cloud=True)
+        return self._omnishot
+
     async def segment_video(self, video_path: str,
                             language: str = "ja",
                             min_segment_duration: float = 0.5,
                             max_segment_duration: float = 15.0,
                             cut_clips: bool = True,
-                            isolate_vocals: bool = True) -> SegmentationResult:
+                            isolate_vocals: bool = True,
+                            use_omnishot: bool = True,
+                            turbo: bool = False,
+                            bypass: bool = False) -> SegmentationResult:
         """
         Main entry point: segment a video into per-sentence, per-speaker clips.
 
@@ -1523,6 +1611,50 @@ class VideoSegmenter:
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Video file not found: {video_path}")
 
+        # --- BYPASS MODE (ZERO-COMPUTE) ---
+        if bypass:
+            await self.update_status("⚡ [BYPASS] Creating single-segment skeleton...")
+            import torchaudio
+            info = await asyncio.to_thread(torchaudio.info, video_path)
+            duration = info.num_frames / info.sample_rate
+            
+            full_segment = Segment(
+                id="BYPASS_0",
+                index=0,
+                start=0.0,
+                end=round(duration, 3),
+                duration=round(duration, 3),
+                speaker="SPEAKER_00",
+                text="[BYPASS_MODE] Full video duration. Segmentation skipped for speed.",
+                words=[Word(text="Full video", start=0.0, end=duration)]
+            )
+            
+            if cut_clips:
+                full_segment.clip_path = video_path # Reuse original video as the "clip"
+            
+            return SegmentationResult(
+                segments=[full_segment],
+                duration=duration,
+                language=language,
+                num_speakers=1,
+                device="cpu",
+                mode="bypass",
+                aligner="none",
+                processing_time=round(time.time() - start_time, 2)
+            )
+
+        # Step 0: Parallel Shot Detection (OmniShotCut)
+        visual_boundaries = []
+        if use_omnishot and not turbo:
+            await self.update_status("Detecting visual shot boundaries (OmniShotCut)...")
+            try:
+                omnishot = self._get_omnishot()
+                visual_boundaries = await asyncio.to_thread(
+                    omnishot.detect_shots, video_path
+                )
+            except Exception as e:
+                logger.warning(f"OmniShotCut failed: {e}. Proceeding with audio-only slicing.")
+
         # Step 1: Extract audio
         await self.update_status("Extracting audio from video...")
         step_start = time.time()
@@ -1542,8 +1674,8 @@ class VideoSegmenter:
         except ImportError:
             is_cpu_mode = True
 
-        # Turbo mode: either forced by cloud_offload or auto-detected on CPU
-        turbo_mode = cloud_offload or is_cpu_mode
+        # Turbo mode: either forced by cloud_offload, manual flag, or auto-detected on CPU
+        turbo_mode = turbo or cloud_offload or is_cpu_mode
         
         logger.info(f"🧬 [PIPELINE_CONFIG] CPU_Mode: {is_cpu_mode}, Cloud_Offload: {cloud_offload}, Groq_Key: {'Set' if groq_key else 'Missing'}")
         
@@ -1577,10 +1709,23 @@ class VideoSegmenter:
         # Step 3: Transcription with word timestamps (offloaded to Groq if key present)
         await self.update_status("Transcribing speech (Whisper ASR)...")
         step_start = time.time()
+        
+        # If turbo mode and no Groq, force a lighter model for speed
+        current_whisper_model = self.whisper_model
+        if turbo_mode and not groq_key:
+            logger.info("⚡ [TURBO] Using 'tiny' Whisper model for local CPU transcription.")
+            self.whisper_model = "tiny"
+            if self._transcriber:
+                self._transcriber = None # Force reload with new model
+        
         transcriber = self._get_transcriber()
         transcription = await asyncio.to_thread(
             transcriber.transcribe, vocals_path, language, True
         )
+        
+        # Restore model for next runs
+        self.whisper_model = current_whisper_model
+        
         logger.info(f"⏱️ Transcription took {time.time() - step_start:.1f}s")
 
         # Step 4: Speaker Diarization (SKIP in Turbo mode)
@@ -1619,6 +1764,7 @@ class VideoSegmenter:
         await self.update_status("Grouping words into sentence segments...")
         segments = self._group_into_segments(
             words_with_speakers,
+            visual_boundaries=visual_boundaries,
             min_duration=min_segment_duration,
             max_duration=max_segment_duration
         )
@@ -1789,6 +1935,7 @@ class VideoSegmenter:
         return refined_words if refined_words else words
 
     def _group_into_segments(self, words: List[Word],
+                              visual_boundaries: List[float] = None,
                               min_duration: float = 0.5,
                               max_duration: float = 15.0,
                               pause_threshold: float = 0.4,
@@ -1825,9 +1972,20 @@ class VideoSegmenter:
             speaker_changed = curr.speaker != prev.speaker
             has_punct = bool(split_punct.match(prev.text))
 
+            # Visual Boundary Check (OmniShotCut integration)
+            visual_split = False
+            if visual_boundaries:
+                # If a visual cut happens between prev and curr
+                for vb in visual_boundaries:
+                    if prev.end <= vb <= curr.start:
+                        visual_split = True
+                        logger.info(f"🎞️ [SHOT_SPLIT] Visual boundary detected at {vb}s between words.")
+                        break
+                    
             # Split conditions (in priority order)
             should_split = (
                 speaker_changed or
+                visual_split or
                 has_punct or
                 gap > pause_threshold or
                 len(current_words) >= max_words or

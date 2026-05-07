@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 # Load environment variables at startup (force override)
 load_dotenv(override=True)
-print(f"🚀 [INIT] CLOUD_OFFLOAD: {os.getenv('CLOUD_OFFLOAD')}")
+print(f"[INIT] CLOUD_OFFLOAD: {os.getenv('CLOUD_OFFLOAD')}")
 
 logger = logging.getLogger("sonora.api")
 
@@ -36,6 +36,8 @@ class SegmentRequest(BaseModel):
     aligner: Optional[str] = "qwen3"  # "qwen3" (SOTA) or "wav2vec2" (legacy)
     cut_clips: Optional[bool] = True
     isolate_vocals: Optional[bool] = True
+    turbo: Optional[bool] = False
+    bypass: Optional[bool] = False
     num_speakers: Optional[int] = None
 
 class TranslateRequest(BaseModel):
@@ -100,6 +102,12 @@ class SynthesizeRequest(BaseModel):
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "service": "sonora-backend", "mode": "swarm_intelligence"}
+
+@app.get("/api/swarm/status")
+async def get_swarm_status():
+    from src.core.shadow_providers import check_swarm_health
+    # Run in thread pool as it performs network I/O
+    return await asyncio.to_thread(check_swarm_health)
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Body, BackgroundTasks
 import uuid
@@ -213,6 +221,8 @@ async def background_segmentation(job_id: str, video_path: str, language: str = 
             "aligner": kwargs.get("aligner", "qwen3"),
             "cut_clips": cut_clips,
             "isolate_vocals": isolate_vocals,
+            "turbo": kwargs.get("turbo", False),
+            "bypass": kwargs.get("bypass", False),
             "num_speakers": num_speakers
         }
 
@@ -331,7 +341,7 @@ async def pipeline_segment(background_tasks: BackgroundTasks, req: SegmentReques
     background_tasks.add_task(
         background_segmentation, job_id, video_path,
         req.language, req.mode, req.cut_clips, req.isolate_vocals, req.num_speakers,
-        **{"aligner": req.aligner}
+        **{"aligner": req.aligner, "turbo": req.turbo, "bypass": req.bypass}
     )
     return {"job_id": job_id, "status": "Segmentation Queued", "mode": req.mode, "aligner": req.aligner}
 

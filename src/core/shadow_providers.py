@@ -3,14 +3,18 @@ import os
 import shutil
 import logging
 import time
-from typing import List, Optional
+import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Optional, Dict, Any
 from openai import OpenAI
 from elevenlabs.client import ElevenLabs
 from gradio_client import Client, handle_file
 from sonora.audio_editing.path_manager import get_data_dir
 from src.core.reliability import get_available_memory
+from src.core.usage_service import record_usage
 
 logger = logging.getLogger("sonora.shadow_providers")
+
 
 def cloud_separate_audio(input_audio_path: str) -> str:
     """Compatibility wrapper — returns just the vocals path from the full 5-stem pipeline."""
@@ -153,12 +157,15 @@ def cloud_granular_separation(input_audio_path: str, word_timestamps: list = Non
             return None
 
     # Parallel Burst Handshake (Take the first success)
+    start_time = time.time()
     with ThreadPoolExecutor(max_workers=3) as executor:
         futures = [executor.submit(_attempt_space, s, m) for s, m in spaces_config]
         for future in as_completed(futures):
             res = future.result()
             if res:
                 result, space, model = res
+                duration = time.time() - start_time
+                record_usage(space, "audio_separation", duration, {"model": model})
                 logger.info(f"✅ Fast-Path Success via {space} [{model}]")
                 
                 # Handle different return formats from Gradio
@@ -436,8 +443,112 @@ def cloud_translate_segment(japanese_text: str, target_syllables: int, style: st
 
 def cloud_generate_voice(text: str, voice_id: str) -> bytes:
     """Fallback: ElevenLabs synthesis."""
+    start_time = time.time()
     api_key = os.getenv("ELEVENLABS_API_KEY")
     if not api_key: raise RuntimeError("ElevenLabs API Key missing")
     client = ElevenLabs(api_key=api_key)
     audio_gen = client.text_to_speech.convert(voice_id=voice_id, text=text, model_id="eleven_flash_v2_5")
-    return b"".join(list(audio_gen))
+    audio_bytes = b"".join(list(audio_gen))
+    duration = time.time() - start_time
+    record_usage("elevenlabs", "tts", duration, {"voice_id": voice_id, "text_len": len(text)})
+    return audio_bytes
+
+def cloud_diarize_video(video_path: str) -> List[Dict]:
+    """
+    Offloads Speaker Diarization to a GPU-enabled HF Space.
+    """
+    diarization_space = os.getenv("DIARIZATION_SPACE_URL", "pyannote/speaker-diarization-3.1")
+    hf_token = os.getenv("HF_TOKEN")
+    
+    start_time = time.time()
+    try:
+        logger.info(f"🔗 [DIARIZATION] Offloading to {diarization_space}...")
+        client = Client(diarization_space, hf_token=hf_token)
+        result = client.predict(
+            audio=handle_file(video_path),
+            api_name="/predict"
+        )
+        
+        # Parse result into Sonora format
+        # Note: Pyannote Space usually returns a JSON or a list of segments
+        segments = []
+        if isinstance(result, str):
+            # Try to parse if it's a string representation of segments
+            try:
+                data = json.loads(result)
+                segments = data if isinstance(data, list) else []
+            except:
+                logger.warning("Failed to parse diarization result string as JSON.")
+        elif isinstance(result, list):
+            segments = result
+            
+        duration = time.time() - start_time
+        record_usage(diarization_space, "diarization", duration)
+        return segments
+    except Exception as e:
+        logger.error(f"❌ Cloud Diarization failed: {e}")
+        return []
+
+def cloud_visual_sync(video_path: str, audio_path: str) -> str:
+    """
+    Offloads Wav2Lip Visual Sync to a GPU-enabled HF Space.
+    """
+    sync_space = os.getenv("WAV2LIP_SPACE_URL", "abidlabs/wav2lip") # Example public space
+    hf_token = os.getenv("HF_TOKEN")
+    
+    start_time = time.time()
+    try:
+        logger.info(f"🎞️ [VISUAL_SYNC] Offloading to {sync_space}...")
+        client = Client(sync_space, hf_token=hf_token)
+        result = client.predict(
+            video=handle_file(video_path),
+            audio=handle_file(audio_path),
+            api_name="/predict"
+        )
+        
+        # Result is typically the path to the synced video file
+        synced_path = result
+        if os.path.exists(synced_path):
+            # Move to Sonora data dir
+            dest = os.path.join(get_data_dir(), "temp", f"synced_{int(time.time())}.mp4")
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy(synced_path, dest)
+            
+            duration = time.time() - start_time
+            record_usage(sync_space, "visual_sync", duration)
+            return dest
+            
+        return video_path
+    except Exception as e:
+        logger.error(f"❌ Cloud Visual Sync failed: {e}")
+        return video_path
+
+def check_swarm_health() -> Dict[str, Any]:
+    """
+    Checks the status of the Cloud Swarm (HF Spaces).
+    Returns a dictionary with status for each service.
+    """
+    spaces = {
+        "separation": os.getenv("DIARIZATION_SPACE_URL", "pyannote/speaker-diarization-3.1"),
+        "visual_sync": os.getenv("WAV2LIP_SPACE_URL", "abidlabs/wav2lip")
+    }
+    hf_token = os.getenv("HF_TOKEN")
+    
+    results = {}
+    for name, space in spaces.items():
+        try:
+            # We use a lightweight call to check if the space is accessible
+            client = Client(space, hf_token=hf_token)
+            # Just getting the client info is usually enough to verify connection
+            results[name] = {
+                "status": "online",
+                "space": space
+            }
+        except Exception as e:
+            results[name] = {
+                "status": "offline",
+                "error": str(e),
+                "space": space
+            }
+            
+    return results

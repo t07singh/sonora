@@ -11,7 +11,8 @@ logger = logging.getLogger("sonora.synthesizer.qwen3")
 
 class Qwen3Engine:
     """
-    Real implementation of Qwen3-TTS (0.6B) for high-quality local synthesis.
+    Stability Layer: Qwen3-TTS (1.7B/0.6B) for Background Characters & Crowds.
+    Provides robust, low-latency synthesis for non-primary dialogue to save VRAM.
     """
     def __init__(self, model_path: str = "models/qwen3"):
         self.model_path = model_path

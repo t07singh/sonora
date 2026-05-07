@@ -42,6 +42,7 @@ const App: React.FC = () => {
     translator: 'SYNC_ACTIVE',
     vision: 'SYNC_ACTIVE'
   });
+  const [cloudSwarmStatus, setCloudSwarmStatus] = useState<any>(null);
 
   useEffect(() => {
     document.documentElement.className = theme;
@@ -72,6 +73,22 @@ const App: React.FC = () => {
   useEffect(() => {
     setWsStatus('CONNECTED');
     addLog("Neural Link established.", "success");
+
+    // Poll Cloud Swarm status
+    const pollSwarm = async () => {
+      try {
+        const res = await fetch('http://localhost:8000/api/swarm/status');
+        if (res.ok) {
+          const data = await res.json();
+          setCloudSwarmStatus(data);
+        }
+      } catch (e) {
+        console.error("Failed to poll Cloud Swarm", e);
+      }
+    };
+    pollSwarm();
+    const interval = setInterval(pollSwarm, 30000); // Every 30s
+    return () => clearInterval(interval);
   }, []);
 
   const executeFullPipeline = async (videoFile: File) => {
@@ -209,12 +226,24 @@ const App: React.FC = () => {
                   Node Cluster Audit
                 </h2>
                 <div className="space-y-4 font-mono text-[11px]">
-                  {(Object.entries(swarmStatus) as [string, string][]).map(([name, status]) => (
-                    <div key={name} className="flex justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
-                      <span className="capitalize text-slate-500 dark:text-slate-400 font-bold">{name}</span>
-                      <span className="text-emerald-500 font-black tracking-tighter">{status}</span>
-                    </div>
                   ))}
+                </div>
+
+                {/* Cloud Swarm Status Section */}
+                <h3 className="text-[10px] font-black uppercase tracking-[0.2em] mt-8 mb-4 text-slate-400">Cloud Swarm Intelligence</h3>
+                <div className="space-y-4 font-mono text-[11px]">
+                  {cloudSwarmStatus ? (
+                    Object.entries(cloudSwarmStatus).map(([name, info]: [string, any]) => (
+                      <div key={name} className="flex justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
+                        <span className="capitalize text-slate-500 dark:text-slate-400 font-bold">{name.replace('_', ' ')}</span>
+                        <span className={info.status === 'online' ? 'text-blue-500 font-black' : 'text-rose-500 font-black'}>
+                          {info.status.toUpperCase()}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-slate-400 italic">Pinging Cloud Nodes...</div>
+                  )}
                 </div>
                 <button onClick={() => setAuditVisible(false)} className="mt-8 w-full py-4 bg-slate-900 dark:bg-slate-100 dark:text-slate-950 text-white rounded-2xl font-black text-[10px] tracking-widest shadow-lg active:scale-95 transition-all">TERMINATE AUDIT</button>
              </div>

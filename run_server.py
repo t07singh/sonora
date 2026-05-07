@@ -39,19 +39,19 @@ def main():
     
     print("API Key Status:")
     if openai_key:
-        print("✓ OPENAI_API_KEY found")
+        print("[OK] OPENAI_API_KEY found")
     else:
-        print("⚠ OPENAI_API_KEY not found (using mock)")
+        print("[!] OPENAI_API_KEY not found (using mock)")
         
     if gemini_key:
-        print(f"✓ GEMINI_API_KEY found (starts with: {gemini_key[:4]}...)")
+        print(f"[OK] GEMINI_API_KEY found (starts with: {gemini_key[:4]}...)")
     else:
-        print("⚠ GEMINI_API_KEY not found (TRANSCRIPTIONS WILL BE MOCKED)")
+        print("[!] GEMINI_API_KEY not found (TRANSCRIPTIONS WILL BE MOCKED)")
 
     if elevenlabs_key:
-        print("✓ ELEVENLABS_API_KEY found")
+        print("[OK] ELEVENLABS_API_KEY found")
     else:
-        print("⚠ ELEVENLABS_API_KEY not found (using mock)")
+        print("[!] ELEVENLABS_API_KEY not found (using mock)")
     
     print("\nServer will be available at:")
     print("   http://0.0.0.0:8000")

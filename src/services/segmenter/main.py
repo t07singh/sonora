@@ -84,6 +84,9 @@ class SegmentRequest(BaseModel):
     max_segment_duration: float = Field(15.0, description="Maximum segment duration in seconds")
     cut_clips: bool = Field(True, description="Whether to cut video into individual clips")
     isolate_vocals: bool = Field(True, description="Whether to isolate vocals with Demucs first")
+    turbo: bool = Field(False, description="Manual Turbo Mode: Bypass Demucs and Pyannote for speed")
+    bypass: bool = Field(False, description="Bypass Mode: Skip segmentation and return one full segment")
+    use_omnishotcut: bool = Field(True, description="Whether to use OmniShotCut for visual-aware slicing")
     num_speakers: Optional[int] = Field(None, description="Hint: number of speakers (None=auto)")
     whisper_model: Optional[str] = Field(None, description="Override Whisper model name")
 
@@ -203,6 +206,7 @@ async def background_segmentation(job_id: str, req: SegmentRequest):
                 "Merging": 0.70,
                 "Running forced": 0.75,
                 "Grouping": 0.80,
+                "Visual": 0.85,
                 "Cutting": 0.90,
                 "complete": 1.0,
             }
@@ -234,7 +238,10 @@ async def background_segmentation(job_id: str, req: SegmentRequest):
                 min_segment_duration=req.min_segment_duration,
                 max_segment_duration=req.max_segment_duration,
                 cut_clips=req.cut_clips,
-                isolate_vocals=req.isolate_vocals
+                isolate_vocals=req.isolate_vocals,
+                use_omnishot=req.use_omnishotcut,
+                turbo=req.turbo,
+                bypass=req.bypass
             )
 
         # Convert to response format
@@ -397,7 +404,7 @@ async def segment_video(req: SegmentRequest, background_tasks: BackgroundTasks):
     save_jobs()
 
     # Add to background tasks
-    logger.info(f"🚀 [TASK_LAUNCH] Job {job_id} launching via BackgroundTasks...")
+    logger.info(f"[TASK_LAUNCH] Job {job_id} launching via BackgroundTasks...")
     background_tasks.add_task(background_segmentation, job_id, req)
 
     # Return immediate response with job_id
